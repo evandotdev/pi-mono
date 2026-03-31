@@ -2545,7 +2545,7 @@ export class InteractiveMode {
 			}
 
 			case "credential_rotate": {
-				this.usageService?.notifyRotation(event.provider);
+				void this.refreshUsageStatusline(event.provider);
 				this.retryCredentialAccountIdPrefix = event.accountIdPrefix;
 				break;
 			}
@@ -3477,6 +3477,23 @@ export class InteractiveMode {
 		this.footerDataProvider.setAvailableProviderCount(uniqueProviders.size);
 	}
 
+	/**
+	 * Refresh usage for one provider and push active account usage into the footer.
+	 * Called after account selection/login/logout/credential rotation.
+	 */
+	private async refreshUsageStatusline(providerId: string): Promise<void> {
+		if (!this.usageService) return;
+		await this.usageService.refreshProvider(providerId);
+		const activeUsage = this.usageService.getActiveUsage(providerId);
+		if (activeUsage) {
+			this.footerDataProvider.setProviderUsage(providerId, activeUsage);
+		} else {
+			this.footerDataProvider.clearProviderUsage(providerId);
+		}
+		this.footer.invalidate();
+		this.ui.requestRender();
+	}
+
 	private showModelSelector(initialSearchInput?: string): void {
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
@@ -3558,8 +3575,7 @@ export class InteractiveMode {
 		if (!changed) {
 			return undefined;
 		}
-		this.usageService?.notifyRotation(providerId);
-		this.ui.requestRender();
+		await this.refreshUsageStatusline(providerId);
 		return this.formatOAuthAccountOption(providerId, credentialIndex);
 	}
 
@@ -3567,6 +3583,7 @@ export class InteractiveMode {
 		try {
 			await this.session.setModel(model);
 			const selectedAccount = await this.maybeSelectOAuthAccount(model.provider);
+			await this.refreshUsageStatusline(model.provider);
 			this.footer.invalidate();
 			this.updateEditorBorderColor();
 			this.showStatus(selectedAccount ? `Model: ${model.id} • ${selectedAccount}` : `Model: ${model.id}`);
@@ -3943,6 +3960,7 @@ export class InteractiveMode {
 							}
 							this.session.modelRegistry.refresh();
 							await this.updateAvailableProviderCount();
+							await this.refreshUsageStatusline(providerId);
 							this.showStatus(`Logged out of ${providerName}`);
 						} catch (error: unknown) {
 							this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -4041,6 +4059,7 @@ export class InteractiveMode {
 			restoreEditor();
 			this.session.modelRegistry.refresh();
 			await this.updateAvailableProviderCount();
+			await this.refreshUsageStatusline(providerId);
 			const credCount = this.session.modelRegistry.authStorage.getCredentialCount(providerId);
 			const countInfo = credCount > 1 ? ` (${credCount} accounts)` : "";
 			this.showStatus(`Logged in to ${providerName}${countInfo}. Credentials saved to ${getAuthPath()}`);

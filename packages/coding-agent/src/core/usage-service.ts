@@ -55,33 +55,20 @@ export class UsageService {
 	}
 
 	/**
-	 * Called when the active credential for a provider has been rotated.
-	 * Immediately updates the status line from cache if usage for the new
-	 * active credential is already available — no waiting for the next poll.
+	 * Refresh usage for one provider immediately.
+	 * Uses cache when fresh, otherwise fetches from provider.
 	 */
-	notifyRotation(providerId: string): void {
+	async refreshProvider(providerId: string): Promise<void> {
 		if (this.disposed) return;
+		await this.fetchProvider(providerId);
+	}
 
+	/**
+	 * Get active account usage for a provider from current cache/state.
+	 */
+	getActiveUsage(providerId: string): ProviderUsage | undefined {
 		const activeIndex = this.authStorage.getActiveIndex(providerId);
-		const credentials = this.authStorage.getCredentials(providerId);
-		const credential = credentials[activeIndex];
-		if (!credential || credential.type !== "oauth") return;
-
-		const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
-		const cacheKey = this.getCacheKey(providerId, activeIndex, accountId);
-		const cached = this.cache.get(cacheKey);
-		if (!cached) return;
-
-		// Update the active flags in the per-provider usage list
-		const existing = this.accountUsage.get(providerId);
-		if (existing) {
-			this.accountUsage.set(
-				providerId,
-				existing.map((entry) => ({ ...entry, active: entry.credentialIndex === activeIndex })),
-			);
-		}
-
-		this.onUsageUpdate(providerId, cached.usage);
+		return this.accountUsage.get(providerId)?.find((entry) => entry.credentialIndex === activeIndex)?.usage;
 	}
 
 	private getCacheKey(providerId: string, credentialIndex: number, accountId?: string): string {
@@ -125,56 +112,64 @@ export class UsageService {
 
 	private async fetchAll(): Promise<void> {
 		for (const providerId of this.authStorage.list()) {
-			const provider = getOAuthProvider(providerId);
-			if (!provider?.fetchUsage) continue;
+			await this.fetchProvider(providerId);
+		}
+	}
 
-			const credentials = this.authStorage.getCredentials(providerId);
-			const activeIndex = this.authStorage.getActiveIndex(providerId);
-			const nextAccountUsage: OAuthAccountUsage[] = [];
+	private async fetchProvider(providerId: string): Promise<void> {
+		const provider = getOAuthProvider(providerId);
+		if (!provider?.fetchUsage) {
+			this.accountUsage.delete(providerId);
+			return;
+		}
 
-			for (let credentialIndex = 0; credentialIndex < credentials.length; credentialIndex++) {
-				const credential = credentials[credentialIndex];
-				if (!credential || credential.type !== "oauth") continue;
+		const credentials = this.authStorage.getCredentials(providerId);
+		const activeIndex = this.authStorage.getActiveIndex(providerId);
+		const nextAccountUsage: OAuthAccountUsage[] = [];
 
-				const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
-				const cacheKey = this.getCacheKey(providerId, credentialIndex, accountId);
-				const cached = this.cache.get(cacheKey);
-				let usage: ProviderUsage | undefined;
+		for (let credentialIndex = 0; credentialIndex < credentials.length; credentialIndex++) {
+			const credential = credentials[credentialIndex];
+			if (!credential || credential.type !== "oauth") continue;
 
-				if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
-					usage = cached.usage;
-				} else {
-					const freshCredential = await this.ensureFreshCredential(providerId, credentialIndex, credential);
-					try {
-						const fetchedUsage = await provider.fetchUsage(freshCredential);
-						if (fetchedUsage && !this.disposed) {
-							this.cache.set(cacheKey, { usage: fetchedUsage, fetchedAt: Date.now() });
-							usage = fetchedUsage;
-						}
-					} catch {
-						usage = cached?.usage;
-					}
-				}
+			const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
+			const cacheKey = this.getCacheKey(providerId, credentialIndex, accountId);
+			const cached = this.cache.get(cacheKey);
+			let usage: ProviderUsage | undefined;
 
-				if (!usage) continue;
-
-				const active = credentialIndex === activeIndex;
-				nextAccountUsage.push({
-					credentialIndex,
-					accountId,
-					usage,
-					active,
-				});
-				if (active) {
-					this.onUsageUpdate(providerId, usage);
-				}
-			}
-
-			if (nextAccountUsage.length > 0) {
-				this.accountUsage.set(providerId, nextAccountUsage);
+			if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+				usage = cached.usage;
 			} else {
-				this.accountUsage.delete(providerId);
+				const freshCredential = await this.ensureFreshCredential(providerId, credentialIndex, credential);
+				try {
+					const fetchedUsage = await provider.fetchUsage(freshCredential);
+					if (fetchedUsage && !this.disposed) {
+						this.cache.set(cacheKey, { usage: fetchedUsage, fetchedAt: Date.now() });
+						usage = fetchedUsage;
+					}
+				} catch {
+					usage = cached?.usage;
+				}
 			}
+
+			if (!usage) continue;
+
+			const active = credentialIndex === activeIndex;
+			nextAccountUsage.push({
+				credentialIndex,
+				accountId,
+				usage,
+				active,
+			});
+		}
+
+		if (nextAccountUsage.length > 0) {
+			this.accountUsage.set(providerId, nextAccountUsage);
+			const activeUsage = nextAccountUsage.find((entry) => entry.active)?.usage;
+			if (activeUsage) {
+				this.onUsageUpdate(providerId, activeUsage);
+			}
+		} else {
+			this.accountUsage.delete(providerId);
 		}
 	}
 }
