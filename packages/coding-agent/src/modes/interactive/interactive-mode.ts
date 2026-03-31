@@ -2538,6 +2538,10 @@ export class InteractiveMode {
 				break;
 			}
 
+			case "credential_rotate": {
+				this.usageService?.notifyRotation(event.provider);
+				break;
+			}
 			case "auto_retry_end": {
 				// Restore escape handler
 				if (this.retryEscapeHandler) {

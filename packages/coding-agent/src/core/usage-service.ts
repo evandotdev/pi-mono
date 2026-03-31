@@ -54,6 +54,36 @@ export class UsageService {
 		return this.accountUsage;
 	}
 
+	/**
+	 * Called when the active credential for a provider has been rotated.
+	 * Immediately updates the status line from cache if usage for the new
+	 * active credential is already available — no waiting for the next poll.
+	 */
+	notifyRotation(providerId: string): void {
+		if (this.disposed) return;
+
+		const activeIndex = this.authStorage.getActiveIndex(providerId);
+		const credentials = this.authStorage.getCredentials(providerId);
+		const credential = credentials[activeIndex];
+		if (!credential || credential.type !== "oauth") return;
+
+		const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
+		const cacheKey = this.getCacheKey(providerId, activeIndex, accountId);
+		const cached = this.cache.get(cacheKey);
+		if (!cached) return;
+
+		// Update the active flags in the per-provider usage list
+		const existing = this.accountUsage.get(providerId);
+		if (existing) {
+			this.accountUsage.set(
+				providerId,
+				existing.map((entry) => ({ ...entry, active: entry.credentialIndex === activeIndex })),
+			);
+		}
+
+		this.onUsageUpdate(providerId, cached.usage);
+	}
+
 	private getCacheKey(providerId: string, credentialIndex: number, accountId?: string): string {
 		return `${providerId}:${accountId ?? `index:${credentialIndex}`}`;
 	}

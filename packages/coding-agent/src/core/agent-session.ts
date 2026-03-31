@@ -126,7 +126,8 @@ export type AgentSessionEvent =
 			errorMessage?: string;
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string };
+	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	| { type: "credential_rotate"; provider: string };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -2439,7 +2440,10 @@ export class AgentSession {
 
 		// Rotate to next credential on rate limit / overload errors
 		if (this.model && this._isRateLimitError(message)) {
-			this._modelRegistry.authStorage.rotateCredential(this.model.provider);
+			const rotated = this._modelRegistry.authStorage.rotateCredential(this.model.provider);
+			if (rotated) {
+				this._emit({ type: "credential_rotate", provider: this.model.provider });
+			}
 		}
 
 		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
