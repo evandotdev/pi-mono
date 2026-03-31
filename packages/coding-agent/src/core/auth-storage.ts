@@ -419,6 +419,19 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Set the active credential index for a provider.
+	 * Returns false if the index is out of bounds or the provider has no credentials.
+	 */
+	setActiveCredentialIndex(provider: string, index: number): boolean {
+		const arr = this.toArray(this.data[provider]);
+		if (arr.length === 0 || index < 0 || index >= arr.length) {
+			return false;
+		}
+		this.activeIndices.set(provider, index);
+		return true;
+	}
+
+	/**
 	 * List all providers with credentials.
 	 */
 	list(): string[] {
