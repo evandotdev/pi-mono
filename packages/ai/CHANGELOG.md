@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `OAuthProviderInterface.fetchUsage` now receives the full `OAuthCredentials` object instead of just an `accessToken` string. Update any custom implementations accordingly.
+
+### Added
+
+- Added `fetchUsage` to `openaiCodexOAuthProvider`, fetching rate-limit utilization from `https://chatgpt.com/api/codex/usage` and exposing primary/secondary windows (e.g. `1h`, `1d`) plus any additional named limits in the status line.
+
 ## [0.67.2] - 2026-04-14
 
 ### Fixed

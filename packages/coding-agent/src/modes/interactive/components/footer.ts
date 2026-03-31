@@ -122,30 +122,36 @@ export class FooterComponent implements Component {
 			statsParts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
 		}
 
-		// Show usage windows for OAuth providers that support it (e.g. Anthropic 5h/7d limits)
+		// Show usage for the current model's OAuth provider only (e.g. Anthropic 5h limit).
+		// Only the window with the soonest reset is shown to keep the footer concise.
+		const currentProvider = state.model?.provider;
 		const providerUsage = this.footerData.getProviderUsage();
-		for (const [, usage] of providerUsage) {
-			const windowParts: string[] = [];
-			let earliestResetsAt: number | undefined;
-			for (const [windowName, window] of Object.entries(usage.windows)) {
-				const pct = Math.round(window.utilizationPercent);
-				windowParts.push(`${pct}%/${windowName}`);
-				if (window.resetsAt !== undefined) {
-					if (earliestResetsAt === undefined || window.resetsAt < earliestResetsAt) {
-						earliestResetsAt = window.resetsAt;
+		const currentUsage = currentProvider ? providerUsage.get(currentProvider) : undefined;
+		if (currentUsage) {
+			let primaryWindowName: string | undefined;
+			let primaryWindow: { utilizationPercent: number; resetsAt?: number } | undefined;
+			for (const [windowName, window] of Object.entries(currentUsage.windows)) {
+				if (
+					primaryWindow === undefined ||
+					(window.resetsAt !== undefined &&
+						(primaryWindow.resetsAt === undefined || window.resetsAt < primaryWindow.resetsAt))
+				) {
+					primaryWindowName = windowName;
+					primaryWindow = window;
+				}
+			}
+			if (primaryWindow && primaryWindowName) {
+				const pct = Math.round(primaryWindow.utilizationPercent);
+				const parts = [`${pct}%/${primaryWindowName}`];
+				if (primaryWindow.resetsAt !== undefined) {
+					const remainingMs = primaryWindow.resetsAt - Date.now();
+					if (remainingMs > 0) {
+						const h = Math.floor(remainingMs / 3600000);
+						const m = Math.floor((remainingMs % 3600000) / 60000);
+						parts.push(h > 0 ? `reset ${h}h${m}m` : `reset ${m}m`);
 					}
 				}
-			}
-			if (earliestResetsAt !== undefined) {
-				const remainingMs = earliestResetsAt - Date.now();
-				if (remainingMs > 0) {
-					const h = Math.floor(remainingMs / 3600000);
-					const m = Math.floor((remainingMs % 3600000) / 60000);
-					windowParts.push(h > 0 ? `reset ${h}h${m}m` : `reset ${m}m`);
-				}
-			}
-			if (windowParts.length > 0) {
-				statsParts.push(windowParts.join(" "));
+				statsParts.push(parts.join(" "));
 			}
 		}
 
