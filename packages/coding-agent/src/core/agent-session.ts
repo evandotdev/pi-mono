@@ -2393,6 +2393,17 @@ export class AgentSession {
 	}
 
 	/**
+	 * Check if an error is specifically a rate limit or overload error
+	 * (as opposed to server errors, network errors, etc.).
+	 * Used to decide whether to rotate credentials.
+	 */
+	private _isRateLimitError(message: AssistantMessage): boolean {
+		if (message.stopReason !== "error" || !message.errorMessage) return false;
+		const err = message.errorMessage;
+		return /overloaded|rate.?limit|too many requests|429/i.test(err);
+	}
+
+	/**
 	 * Handle retryable errors with exponential backoff.
 	 * @returns true if retry was initiated, false if max retries exceeded or disabled
 	 */
@@ -2424,6 +2435,11 @@ export class AgentSession {
 			this._retryAttempt = 0;
 			this._resolveRetry(); // Resolve so waitForRetry() completes
 			return false;
+		}
+
+		// Rotate to next credential on rate limit / overload errors
+		if (this.model && this._isRateLimitError(message)) {
+			this._modelRegistry.authStorage.rotateCredential(this.model.provider);
 		}
 
 		const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);

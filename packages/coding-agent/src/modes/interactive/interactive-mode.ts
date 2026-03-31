@@ -3850,20 +3850,25 @@ export class InteractiveMode {
 			const selector = new OAuthSelectorComponent(
 				mode,
 				this.session.modelRegistry.authStorage,
-				async (providerId: string) => {
+				async (providerId: string, targetIndex: number | null) => {
 					done();
 
 					if (mode === "login") {
-						await this.showLoginDialog(providerId);
+						await this.showLoginDialog(providerId, targetIndex ?? undefined);
 					} else {
 						// Logout flow
-						const providerInfo = this.session.modelRegistry.authStorage
-							.getOAuthProviders()
-							.find((p) => p.id === providerId);
+						const authStorage = this.session.modelRegistry.authStorage;
+						const providerInfo = authStorage.getOAuthProviders().find((p) => p.id === providerId);
 						const providerName = providerInfo?.name || providerId;
 
 						try {
-							this.session.modelRegistry.authStorage.logout(providerId);
+							if (targetIndex !== null) {
+								// Remove a specific credential from the pool
+								authStorage.removeCredentialAt(providerId, targetIndex);
+							} else {
+								// Remove all credentials for the provider
+								authStorage.logout(providerId);
+							}
 							this.session.modelRegistry.refresh();
 							await this.updateAvailableProviderCount();
 							this.showStatus(`Logged out of ${providerName}`);
@@ -3881,7 +3886,7 @@ export class InteractiveMode {
 		});
 	}
 
-	private async showLoginDialog(providerId: string): Promise<void> {
+	private async showLoginDialog(providerId: string, targetIndex?: number): Promise<void> {
 		const providerInfo = this.session.modelRegistry.authStorage.getOAuthProviders().find((p) => p.id === providerId);
 		const providerName = providerInfo?.name || providerId;
 
@@ -3916,51 +3921,57 @@ export class InteractiveMode {
 		};
 
 		try {
-			await this.session.modelRegistry.authStorage.login(providerId as OAuthProviderId, {
-				onAuth: (info: { url: string; instructions?: string }) => {
-					dialog.showAuth(info.url, info.instructions);
+			await this.session.modelRegistry.authStorage.login(
+				providerId as OAuthProviderId,
+				{
+					onAuth: (info: { url: string; instructions?: string }) => {
+						dialog.showAuth(info.url, info.instructions);
 
-					if (usesCallbackServer) {
-						// Show input for manual paste, racing with callback
-						dialog
-							.showManualInput("Paste redirect URL below, or complete login in browser:")
-							.then((value) => {
-								if (value && manualCodeResolve) {
-									manualCodeResolve(value);
-									manualCodeResolve = undefined;
-								}
-							})
-							.catch(() => {
-								if (manualCodeReject) {
-									manualCodeReject(new Error("Login cancelled"));
-									manualCodeReject = undefined;
-								}
-							});
-					} else if (providerId === "github-copilot") {
-						// GitHub Copilot polls after onAuth
-						dialog.showWaiting("Waiting for browser authentication...");
-					}
-					// For Anthropic: onPrompt is called immediately after
+						if (usesCallbackServer) {
+							// Show input for manual paste, racing with callback
+							dialog
+								.showManualInput("Paste redirect URL below, or complete login in browser:")
+								.then((value) => {
+									if (value && manualCodeResolve) {
+										manualCodeResolve(value);
+										manualCodeResolve = undefined;
+									}
+								})
+								.catch(() => {
+									if (manualCodeReject) {
+										manualCodeReject(new Error("Login cancelled"));
+										manualCodeReject = undefined;
+									}
+								});
+						} else if (providerId === "github-copilot") {
+							// GitHub Copilot polls after onAuth
+							dialog.showWaiting("Waiting for browser authentication...");
+						}
+						// For Anthropic: onPrompt is called immediately after
+					},
+
+					onPrompt: async (prompt: { message: string; placeholder?: string }) => {
+						return dialog.showPrompt(prompt.message, prompt.placeholder);
+					},
+
+					onProgress: (message: string) => {
+						dialog.showProgress(message);
+					},
+
+					onManualCodeInput: () => manualCodePromise,
+
+					signal: dialog.signal,
 				},
-
-				onPrompt: async (prompt: { message: string; placeholder?: string }) => {
-					return dialog.showPrompt(prompt.message, prompt.placeholder);
-				},
-
-				onProgress: (message: string) => {
-					dialog.showProgress(message);
-				},
-
-				onManualCodeInput: () => manualCodePromise,
-
-				signal: dialog.signal,
-			});
+				targetIndex,
+			);
 
 			// Success
 			restoreEditor();
 			this.session.modelRegistry.refresh();
 			await this.updateAvailableProviderCount();
-			this.showStatus(`Logged in to ${providerName}. Credentials saved to ${getAuthPath()}`);
+			const credCount = this.session.modelRegistry.authStorage.getCredentialCount(providerId);
+			const countInfo = credCount > 1 ? ` (${credCount} accounts)` : "";
+			this.showStatus(`Logged in to ${providerName}${countInfo}. Credentials saved to ${getAuthPath()}`);
 		} catch (error: unknown) {
 			restoreEditor();
 			const errorMsg = error instanceof Error ? error.message : String(error);

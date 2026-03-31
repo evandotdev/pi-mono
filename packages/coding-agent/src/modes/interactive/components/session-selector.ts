@@ -54,7 +54,7 @@ class SessionSelectorHeader implements Component {
 	private requestRender: () => void;
 	private loading = false;
 	private loadProgress: { loaded: number; total: number } | null = null;
-	private showPath = true;
+	private showPath = false;
 	private confirmingDeletePath: string | null = null;
 	private statusMessage: { type: "info" | "error"; message: string } | null = null;
 	private statusTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -271,7 +271,7 @@ class SessionList implements Component, Focusable {
 	private sortMode: SortMode = "threaded";
 	private nameFilter: NameFilter = "all";
 	private keybindings: KeybindingsManager;
-	private showPath = true;
+	private showPath = false;
 	private confirmingDeletePath: string | null = null;
 	private currentSessionFilePath?: string;
 	public onSelect?: (sessionPath: string) => void;

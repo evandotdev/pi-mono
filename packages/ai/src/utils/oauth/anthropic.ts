@@ -40,6 +40,7 @@ const CALLBACK_PATH = "/callback";
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
 const SCOPES =
 	"org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+const PROFILE_URL = "https://api.anthropic.com/api/oauth/profile";
 async function getNodeApis(): Promise<NodeApis> {
 	if (nodeApis) return nodeApis;
 	if (!nodeApisPromise) {
@@ -192,6 +193,30 @@ async function postJson(url: string, body: Record<string, string | number>): Pro
 	return responseBody;
 }
 
+/**
+ * Fetch the account UUID for the authenticated user.
+ * Returns null on any failure (non-critical).
+ */
+async function fetchAccountId(accessToken: string): Promise<string | null> {
+	try {
+		const response = await fetch(PROFILE_URL, {
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${accessToken}`,
+				"anthropic-beta": "oauth-2025-04-20",
+			},
+			signal: AbortSignal.timeout(10_000),
+		});
+		if (!response.ok) return null;
+		const data = (await response.json()) as {
+			account?: { uuid?: string };
+		};
+		return data.account?.uuid ?? null;
+	} catch {
+		return null;
+	}
+}
+
 async function exchangeAuthorizationCode(
 	code: string,
 	state: string,
@@ -223,11 +248,19 @@ async function exchangeAuthorizationCode(
 		);
 	}
 
-	return {
+	const credentials: OAuthCredentials = {
 		refresh: tokenData.refresh_token,
 		access: tokenData.access_token,
 		expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
 	};
+
+	// Fetch account ID for multi-credential deduplication
+	const accountId = await fetchAccountId(tokenData.access_token);
+	if (accountId) {
+		credentials.accountId = accountId;
+	}
+
+	return credentials;
 }
 
 /**
@@ -399,7 +432,10 @@ export const anthropicOAuthProvider: OAuthProviderInterface = {
 	},
 
 	async refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
-		return refreshAnthropicToken(credentials.refresh);
+		const refreshed = await refreshAnthropicToken(credentials.refresh);
+		// Preserve accountId across refreshes
+		if (credentials.accountId) refreshed.accountId = credentials.accountId;
+		return refreshed;
 	},
 
 	getApiKey(credentials: OAuthCredentials): string {

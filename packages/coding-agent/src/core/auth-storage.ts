@@ -30,7 +30,10 @@ export type OAuthCredential = {
 
 export type AuthCredential = ApiKeyCredential | OAuthCredential;
 
-export type AuthStorageData = Record<string, AuthCredential>;
+/** A single credential or an array of credentials for round-robin rotation. */
+export type AuthStorageValue = AuthCredential | AuthCredential[];
+
+export type AuthStorageData = Record<string, AuthStorageValue>;
 
 type LockResult<T> = {
 	result: T;
@@ -180,6 +183,10 @@ export class InMemoryAuthStorageBackend implements AuthStorageBackend {
 
 /**
  * Credential storage backed by a JSON file.
+ *
+ * Supports multiple credentials per provider for round-robin rotation.
+ * When a single credential is stored, auth.json uses the original flat format.
+ * When multiple credentials exist, they are stored as an array.
  */
 export class AuthStorage {
 	private data: AuthStorageData = {};
@@ -187,6 +194,8 @@ export class AuthStorage {
 	private fallbackResolver?: (provider: string) => string | undefined;
 	private loadError: Error | null = null;
 	private errors: Error[] = [];
+	/** In-memory active credential index per provider (not persisted). */
+	private activeIndices: Map<string, number> = new Map();
 
 	private constructor(private storage: AuthStorageBackend) {
 		this.reload();
@@ -242,6 +251,23 @@ export class AuthStorage {
 	}
 
 	/**
+	 * Normalize a storage value to an array of credentials.
+	 */
+	private toArray(value: AuthStorageValue | undefined): AuthCredential[] {
+		if (!value) return [];
+		return Array.isArray(value) ? value : [value];
+	}
+
+	/**
+	 * Normalize an array back to a storage value (single credential or array).
+	 */
+	private fromArray(arr: AuthCredential[]): AuthStorageValue | undefined {
+		if (arr.length === 0) return undefined;
+		if (arr.length === 1) return arr[0];
+		return arr;
+	}
+
+	/**
 	 * Reload credentials from storage.
 	 */
 	reload(): void {
@@ -259,7 +285,7 @@ export class AuthStorage {
 		}
 	}
 
-	private persistProviderChange(provider: string, credential: AuthCredential | undefined): void {
+	private persistProviderChange(provider: string, value: AuthStorageValue | undefined): void {
 		if (this.loadError) {
 			return;
 		}
@@ -268,8 +294,8 @@ export class AuthStorage {
 			this.storage.withLock((current) => {
 				const currentData = this.parseStorageData(current);
 				const merged: AuthStorageData = { ...currentData };
-				if (credential) {
-					merged[provider] = credential;
+				if (value !== undefined) {
+					merged[provider] = value;
 				} else {
 					delete merged[provider];
 				}
@@ -281,26 +307,115 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Get credential for a provider.
+	 * Get the active credential for a provider.
+	 * When multiple credentials are stored, returns the one at the active index.
 	 */
 	get(provider: string): AuthCredential | undefined {
-		return this.data[provider] ?? undefined;
+		const arr = this.toArray(this.data[provider]);
+		if (arr.length === 0) return undefined;
+		const index = this.activeIndices.get(provider) ?? 0;
+		return arr[index % arr.length];
 	}
 
 	/**
-	 * Set credential for a provider.
+	 * Get all credentials for a provider as an array.
+	 */
+	getCredentials(provider: string): AuthCredential[] {
+		return this.toArray(this.data[provider]);
+	}
+
+	/**
+	 * Get number of credentials stored for a provider.
+	 */
+	getCredentialCount(provider: string): number {
+		return this.toArray(this.data[provider]).length;
+	}
+
+	/**
+	 * Get the active credential index for a provider.
+	 */
+	getActiveIndex(provider: string): number {
+		const arr = this.toArray(this.data[provider]);
+		if (arr.length === 0) return 0;
+		return (this.activeIndices.get(provider) ?? 0) % arr.length;
+	}
+
+	/**
+	 * Set credential for a provider (replaces all existing credentials).
 	 */
 	set(provider: string, credential: AuthCredential): void {
 		this.data[provider] = credential;
+		this.activeIndices.delete(provider);
 		this.persistProviderChange(provider, credential);
 	}
 
 	/**
-	 * Remove credential for a provider.
+	 * Add a credential to a provider's pool.
+	 * If the provider already has credentials, appends to the list.
+	 */
+	addCredential(provider: string, credential: AuthCredential): void {
+		const existing = this.toArray(this.data[provider]);
+		existing.push(credential);
+		const value = this.fromArray(existing)!;
+		this.data[provider] = value;
+		this.persistProviderChange(provider, value);
+	}
+
+	/**
+	 * Replace the credential at a specific index.
+	 */
+	setCredentialAt(provider: string, index: number, credential: AuthCredential): void {
+		const arr = this.toArray(this.data[provider]);
+		if (index < 0 || index >= arr.length) return;
+		arr[index] = credential;
+		const value = this.fromArray(arr)!;
+		this.data[provider] = value;
+		this.persistProviderChange(provider, value);
+	}
+
+	/**
+	 * Remove a specific credential by index.
+	 */
+	removeCredentialAt(provider: string, index: number): void {
+		const arr = this.toArray(this.data[provider]);
+		if (index < 0 || index >= arr.length) return;
+		arr.splice(index, 1);
+		const value = this.fromArray(arr);
+		if (value !== undefined) {
+			this.data[provider] = value;
+		} else {
+			delete this.data[provider];
+		}
+		// Adjust active index
+		const activeIdx = this.activeIndices.get(provider) ?? 0;
+		if (arr.length === 0) {
+			this.activeIndices.delete(provider);
+		} else if (activeIdx >= arr.length) {
+			this.activeIndices.set(provider, arr.length - 1);
+		}
+		this.persistProviderChange(provider, value);
+	}
+
+	/**
+	 * Remove all credentials for a provider.
 	 */
 	remove(provider: string): void {
 		delete this.data[provider];
+		this.activeIndices.delete(provider);
 		this.persistProviderChange(provider, undefined);
+	}
+
+	/**
+	 * Rotate to the next credential for a provider.
+	 * @returns true if rotation happened (i.e., multiple credentials exist)
+	 */
+	rotateCredential(provider: string): boolean {
+		const arr = this.toArray(this.data[provider]);
+		if (arr.length <= 1) return false;
+		const currentIndex = this.activeIndices.get(provider) ?? 0;
+		const nextIndex = (currentIndex + 1) % arr.length;
+		this.activeIndices.set(provider, nextIndex);
+		return true;
 	}
 
 	/**
@@ -344,15 +459,43 @@ export class AuthStorage {
 
 	/**
 	 * Login to an OAuth provider.
+	 *
+	 * If `targetIndex` is provided, the credential at that index is replaced
+	 * unconditionally (used when the user explicitly picks a slot from the UI).
+	 *
+	 * Otherwise, if the new credential carries an accountId matching an existing
+	 * entry in the pool it is replaced in-place; if not it is appended.
 	 */
-	async login(providerId: OAuthProviderId, callbacks: OAuthLoginCallbacks): Promise<void> {
+	async login(providerId: OAuthProviderId, callbacks: OAuthLoginCallbacks, targetIndex?: number): Promise<void> {
 		const provider = getOAuthProvider(providerId);
 		if (!provider) {
 			throw new Error(`Unknown OAuth provider: ${providerId}`);
 		}
 
 		const credentials = await provider.login(callbacks);
-		this.set(providerId, { type: "oauth", ...credentials });
+		const newCred: AuthCredential = { type: "oauth", ...credentials };
+
+		// Explicit slot selection from the UI — replace in-place
+		if (targetIndex !== undefined) {
+			const existing = this.toArray(this.data[providerId]);
+			if (targetIndex >= 0 && targetIndex < existing.length) {
+				this.setCredentialAt(providerId, targetIndex, newCred);
+				return;
+			}
+		}
+
+		// Automatic deduplication by accountId
+		const accountId = typeof credentials.accountId === "string" ? credentials.accountId : undefined;
+		if (accountId) {
+			const existing = this.toArray(this.data[providerId]);
+			const matchIdx = existing.findIndex((c) => c.type === "oauth" && c.accountId === accountId);
+			if (matchIdx !== -1) {
+				this.setCredentialAt(providerId, matchIdx, newCred);
+				return;
+			}
+		}
+
+		this.addCredential(providerId, newCred);
 	}
 
 	/**
@@ -365,9 +508,11 @@ export class AuthStorage {
 	/**
 	 * Refresh OAuth token with backend locking to prevent race conditions.
 	 * Multiple pi instances may try to refresh simultaneously when tokens expire.
+	 * @param credIndex - The index of the credential within the provider's pool to refresh.
 	 */
 	private async refreshOAuthTokenWithLock(
 		providerId: OAuthProviderId,
+		credIndex: number,
 	): Promise<{ apiKey: string; newCredentials: OAuthCredentials } | null> {
 		const provider = getOAuthProvider(providerId);
 		if (!provider) {
@@ -379,8 +524,9 @@ export class AuthStorage {
 			this.data = currentData;
 			this.loadError = null;
 
-			const cred = currentData[providerId];
-			if (cred?.type !== "oauth") {
+			const arr = this.toArray(currentData[providerId]);
+			const cred = arr[credIndex];
+			if (!cred || cred.type !== "oauth") {
 				return { result: null };
 			}
 
@@ -388,21 +534,22 @@ export class AuthStorage {
 				return { result: { apiKey: provider.getApiKey(cred), newCredentials: cred } };
 			}
 
-			const oauthCreds: Record<string, OAuthCredentials> = {};
-			for (const [key, value] of Object.entries(currentData)) {
-				if (value.type === "oauth") {
-					oauthCreds[key] = value;
-				}
-			}
+			// Build single-entry map for getOAuthApiKey (it expects Record<providerId, creds>)
+			const oauthCreds: Record<string, OAuthCredentials> = { [providerId]: cred };
 
 			const refreshed = await getOAuthApiKey(providerId, oauthCreds);
 			if (!refreshed) {
 				return { result: null };
 			}
 
+			// Update the specific credential in the array
+			const updatedArr = [...arr];
+			updatedArr[credIndex] = { type: "oauth", ...refreshed.newCredentials };
+			const value = this.fromArray(updatedArr)!;
+
 			const merged: AuthStorageData = {
 				...currentData,
-				[providerId]: { type: "oauth", ...refreshed.newCredentials },
+				[providerId]: value,
 			};
 			this.data = merged;
 			this.loadError = null;
@@ -428,7 +575,9 @@ export class AuthStorage {
 			return runtimeKey;
 		}
 
-		const cred = this.data[providerId];
+		const arr = this.toArray(this.data[providerId]);
+		const activeIdx = this.activeIndices.get(providerId) ?? 0;
+		const cred = arr.length > 0 ? arr[activeIdx % arr.length] : undefined;
 
 		if (cred?.type === "api_key") {
 			return resolveConfigValue(cred.key);
@@ -441,13 +590,15 @@ export class AuthStorage {
 				return undefined;
 			}
 
+			const credIndex = activeIdx % arr.length;
+
 			// Check if token needs refresh
 			const needsRefresh = Date.now() >= cred.expires;
 
 			if (needsRefresh) {
 				// Use locked refresh to prevent race conditions
 				try {
-					const result = await this.refreshOAuthTokenWithLock(providerId);
+					const result = await this.refreshOAuthTokenWithLock(providerId, credIndex);
 					if (result) {
 						return result.apiKey;
 					}
@@ -455,7 +606,8 @@ export class AuthStorage {
 					this.recordError(error);
 					// Refresh failed - re-read file to check if another instance succeeded
 					this.reload();
-					const updatedCred = this.data[providerId];
+					const updatedArr = this.toArray(this.data[providerId]);
+					const updatedCred = updatedArr[credIndex];
 
 					if (updatedCred?.type === "oauth" && Date.now() < updatedCred.expires) {
 						// Another instance refreshed successfully, use those credentials
