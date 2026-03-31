@@ -83,8 +83,12 @@ export class OAuthSelectorComponent extends Container {
 		const label = `${Math.round(percent)}%`;
 		if (percent > 95) return theme.fg("error", label);
 		if (percent >= 70) return theme.fg("warning", label);
-		if (percent >= 50) return theme.fg("accent", label);
-		return theme.fg("dim", label);
+		if (percent > 50) return theme.fg("accent", label);
+		if (percent > 30) {
+			const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
+			return `${lightYellow}${label}\x1b[39m`;
+		}
+		return theme.fg("success", label);
 	}
 
 	private formatUsageLabel(usage: ProviderUsage): string {
