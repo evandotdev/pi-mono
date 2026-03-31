@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "features": {
+    "pathProtection": true,
+    "permissionGate": true
+  },
+  "pathProtection": {
+    "zeroAccess": [
+      { "pattern": ".env", "description": "environment secrets" },
+      { "pattern": ".env.local", "description": "local environment secrets" },
+      { "pattern": ".env.production", "description": "production environment secrets" },
+      { "pattern": ".env.prod", "description": "production environment secrets" },
+      { "pattern": ".dev.vars", "description": "local secret vars" }
+    ],
+    "readOnly": [],
+    "noDelete": []
+  },
+  "permissionGate": {
+    "patterns": [
+      {
+        "pattern": "rm -rf",
+        "description": "recursive force delete",
+        "requireConfirmation": false
+      },
+      {
+        "pattern": "rm -rf /",
+        "description": "recursive force delete",
+        "requireConfirmation": false
+      },
+      {
+        "pattern": "sudo",
+        "description": "superuser command",
+        "requireConfirmation": false
+      }
+    ]
+  }
+}

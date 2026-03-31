@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
-import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { resolveJsonConfig } from "./lib/config.ts";
 
 interface PathRule {
 	pattern: string;
@@ -36,11 +36,6 @@ interface PartialGuardrailsConfig {
 	features?: Partial<GuardrailsConfig["features"]>;
 	pathProtection?: Partial<GuardrailsConfig["pathProtection"]>;
 	permissionGate?: Partial<GuardrailsConfig["permissionGate"]>;
-}
-
-interface ConfigReadResult {
-	hasConfig: boolean;
-	config: PartialGuardrailsConfig;
 }
 
 interface CompiledPermissionRule {
@@ -158,17 +153,6 @@ function parseGuardrailsConfig(value: unknown): PartialGuardrailsConfig {
 	};
 }
 
-function readConfigFile(configPath: string): ConfigReadResult | null {
-	if (!fs.existsSync(configPath)) return null;
-
-	const content = fs.readFileSync(configPath, "utf8");
-	const parsed = JSON.parse(content) as unknown;
-	return {
-		hasConfig: true,
-		config: parseGuardrailsConfig(parsed),
-	};
-}
-
 function mergeConfig(base: GuardrailsConfig, override: PartialGuardrailsConfig): GuardrailsConfig {
 	return {
 		enabled: override.enabled ?? base.enabled,
@@ -234,26 +218,61 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
-		const projectConfigPath = path.join(ctx.cwd, ".pi", "guardrails.json");
-		const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "guardrails.json");
-
 		try {
-			const globalConfig = readConfigFile(globalConfigPath);
-			const projectConfig = readConfigFile(projectConfigPath);
+			const resolved = resolveJsonConfig<PartialGuardrailsConfig>({
+				cwd: ctx.cwd,
+				extensionFileUrl: import.meta.url,
+				fileName: "guardrails.json",
+				defaultConfig: {},
+				parse: parseGuardrailsConfig,
+				merge: (base, override) => ({
+					...base,
+					...override,
+					features: { ...base.features, ...override.features },
+					pathProtection: {
+						...base.pathProtection,
+						...override.pathProtection,
+						zeroAccess: [
+							...(base.pathProtection?.zeroAccess ?? []),
+							...(override.pathProtection?.zeroAccess ?? []),
+						],
+						readOnly: [
+							...(base.pathProtection?.readOnly ?? []),
+							...(override.pathProtection?.readOnly ?? []),
+						],
+						noDelete: [
+							...(base.pathProtection?.noDelete ?? []),
+							...(override.pathProtection?.noDelete ?? []),
+						],
+					},
+					permissionGate: {
+						...base.permissionGate,
+						...override.permissionGate,
+						patterns: [
+							...(base.permissionGate?.patterns ?? []),
+							...(override.permissionGate?.patterns ?? []),
+						],
+					},
+				}),
+			});
 
-			const mergedGlobal = globalConfig ? mergeConfig(DEFAULT_CONFIG, globalConfig.config) : DEFAULT_CONFIG;
-			config = projectConfig ? mergeConfig(mergedGlobal, projectConfig.config) : mergedGlobal;
+			config = mergeConfig(DEFAULT_CONFIG, resolved.config);
 			compiledPermissionRules = compilePermissionRules(config.permissionGate.patterns, (message) => ctx.ui.notify(message));
 
-			const hasProject = projectConfig?.hasConfig ?? false;
-			const hasGlobal = globalConfig?.hasConfig ?? false;
-			if (!hasProject && !hasGlobal) {
-				ctx.ui.notify("Guardrails: no .pi/guardrails.json or ~/.pi/agent/guardrails.json found");
+			if (resolved.sources.length === 0) {
+				ctx.ui.notify(
+					`Guardrails: no config found at ${resolved.paths.projectPath}, ${resolved.paths.globalPath}, or ${resolved.paths.repoDefaultPath}`,
+				);
 			} else if (!config.enabled) {
-				ctx.ui.notify("Guardrails: disabled by config");
+				const lastSource = resolved.appliedSources[resolved.appliedSources.length - 1];
+				if (lastSource) {
+					ctx.ui.notify(`Guardrails: disabled by ${lastSource.scope} config at ${lastSource.path}`);
+				} else {
+					ctx.ui.notify("Guardrails: disabled by config");
+				}
 			} else {
-				const source = hasProject && hasGlobal ? "project + global" : hasProject ? "project" : "global";
-				ctx.ui.notify(`Guardrails: loaded ${countRules(config)} rules from ${source} config`);
+				const sourceSummary = resolved.appliedSources.map((source) => `${source.scope} (${source.path})`).join(" + ");
+				ctx.ui.notify(`Guardrails: loaded ${countRules(config)} rules from ${sourceSummary}`);
 			}
 		} catch (err) {
 			ctx.ui.notify(`Guardrails: failed to load config: ${err instanceof Error ? err.message : String(err)}`);
