@@ -49,6 +49,7 @@ function createSession(options: {
 			getEntries: () => entries,
 			getSessionName: () => options.sessionName,
 			getCwd: () => "/tmp/project",
+			getSessionId: () => "12345678-1234-1234-1234-1234567890ab",
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
 		modelRegistry: {

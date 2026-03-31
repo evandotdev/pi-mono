@@ -123,11 +123,11 @@ export class FooterComponent implements Component {
 			pwd = `${pwd} (${branch})`;
 		}
 
-		// Add session name if set
+		// Add session id and name
+		const sessionId = this.session.sessionManager.getSessionId();
 		const sessionName = this.session.sessionManager.getSessionName();
-		if (sessionName) {
-			pwd = `${pwd} • ${sessionName}`;
-		}
+		const shortSessionId = sessionId.slice(0, 8);
+		pwd = sessionName ? `${pwd} • ${sessionName} (${shortSessionId})` : `${pwd} • ${shortSessionId}`;
 
 		// Build stats line
 		const statsParts = [];
