@@ -41,6 +41,28 @@ Tools for building AI agents and managing LLM deployments.
 | **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
 | **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
 
+## Fork Updates
+
+### Custom Extensions
+
+- [grep-home-shorten.ts](.pi/extensions/grep-home-shorten.ts) truncates your `$HOME` variable into `~` to save tokens
+- [guardrails.ts](.pi/extensions/guardrails.ts) prevents risky commands like `sudo` or `rm -rf ...` with repo-default/project/global scope
+
+#### Provided Extensions
+
+- [diff.ts](.pi/extensions/diff.ts)
+- [files.ts](.pi/extensions/files.ts)
+- [redraws.ts](.pi/extensions/redraws.ts)
+- [tps.ts](.pi/extensions/tps.ts)
+- [prompt-url-widget.ts](.pi/extensions/prompt-url-widget.ts)
+
+### Enhancements
+- credential load balancing via different providers (anthropic, openai)
+  - /model allows you to show which provider to use
+  - /login updated to list multiple accounts per provider
+  - automatic credential rotation on rate-limit/overload retry
+- 5h, 7d usage limits directly displayed in statusline
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).
