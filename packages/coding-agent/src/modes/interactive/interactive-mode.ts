@@ -213,6 +213,7 @@ export class InteractiveMode {
 	// Auto-retry state
 	private retryLoader: Loader | undefined = undefined;
 	private retryEscapeHandler?: () => void;
+	private retryCredentialAccountIdPrefix: string | undefined = undefined;
 
 	// Messages queued while compaction is running
 	private compactionQueuedMessages: CompactionQueuedMessage[] = [];
@@ -2527,11 +2528,16 @@ export class InteractiveMode {
 				// Show retry indicator
 				this.statusContainer.clear();
 				const delaySeconds = Math.round(event.delayMs / 1000);
+				const accountIdPrefix = this.retryCredentialAccountIdPrefix;
+				this.retryCredentialAccountIdPrefix = undefined;
+				const retryLabel = accountIdPrefix
+					? `Retrying with API key ${accountIdPrefix}... (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s... (${keyText("app.interrupt")} to cancel)`
+					: `Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s... (${keyText("app.interrupt")} to cancel)`;
 				this.retryLoader = new Loader(
 					this.ui,
 					(spinner) => theme.fg("warning", spinner),
 					(text) => theme.fg("muted", text),
-					`Retrying (${event.attempt}/${event.maxAttempts}) in ${delaySeconds}s... (${keyText("app.interrupt")} to cancel)`,
+					retryLabel,
 				);
 				this.statusContainer.addChild(this.retryLoader);
 				this.ui.requestRender();
@@ -2540,6 +2546,7 @@ export class InteractiveMode {
 
 			case "credential_rotate": {
 				this.usageService?.notifyRotation(event.provider);
+				this.retryCredentialAccountIdPrefix = event.accountIdPrefix;
 				break;
 			}
 			case "auto_retry_end": {
@@ -3438,15 +3445,7 @@ export class InteractiveMode {
 
 		const model = await this.findExactModelMatch(searchTerm);
 		if (model) {
-			try {
-				await this.session.setModel(model);
-				this.footer.invalidate();
-				this.updateEditorBorderColor();
-				this.showStatus(`Model: ${model.id}`);
-				this.checkDaxnutsEasterEgg(model);
-			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
-			}
+			await this.selectModelAndMaybeAccount(model);
 			return;
 		}
 
@@ -3487,17 +3486,8 @@ export class InteractiveMode {
 				this.session.modelRegistry,
 				this.session.scopedModels,
 				async (model) => {
-					try {
-						await this.session.setModel(model);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
-						done();
-						this.showStatus(`Model: ${model.id}`);
-						this.checkDaxnutsEasterEgg(model);
-					} catch (error) {
-						done();
-						this.showError(error instanceof Error ? error.message : String(error));
-					}
+					done();
+					await this.selectModelAndMaybeAccount(model);
 				},
 				() => {
 					done();
@@ -3507,6 +3497,83 @@ export class InteractiveMode {
 			);
 			return { component: selector, focus: selector };
 		});
+	}
+
+	private formatOAuthAccountOption(providerId: string, credentialIndex: number): string {
+		const credentials = this.session.modelRegistry.authStorage.getCredentials(providerId);
+		const credential = credentials[credentialIndex];
+		if (!credential || credential.type !== "oauth") {
+			return `Account ${credentialIndex + 1}`;
+		}
+
+		const accountId = typeof credential.accountId === "string" ? credential.accountId.slice(0, 8) : undefined;
+		const usageEntry = this.usageService
+			?.getAllAccountUsage()
+			.get(providerId)
+			?.find((entry) => entry.credentialIndex === credentialIndex);
+		const usageLabel = usageEntry
+			? Object.entries(usageEntry.usage.windows)
+					.sort((a, b) => {
+						const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+						const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+						if (resetA !== resetB) return resetA - resetB;
+						return a[0].localeCompare(b[0]);
+					})
+					.map(([windowName, window]) => `${windowName} ${Math.round(window.utilizationPercent)}%`)
+					.join(" · ")
+			: undefined;
+		const active =
+			this.session.modelRegistry.authStorage.getActiveIndex(providerId) === credentialIndex ? " active" : "";
+		const parts = [`Account ${credentialIndex + 1}`];
+		if (accountId) parts.push(accountId);
+		if (usageLabel) parts.push(usageLabel);
+		if (active) parts.push(active.trim());
+		return parts.join(" • ");
+	}
+
+	private async maybeSelectOAuthAccount(providerId: string): Promise<string | undefined> {
+		const authStorage = this.session.modelRegistry.authStorage;
+		const credentials = authStorage.getCredentials(providerId);
+		const oauthCredentialIndices = credentials
+			.map((credential, index) => ({ credential, index }))
+			.filter((entry) => entry.credential.type === "oauth")
+			.map((entry) => entry.index);
+		if (oauthCredentialIndices.length <= 1) {
+			return undefined;
+		}
+
+		const options = oauthCredentialIndices.map((index) => this.formatOAuthAccountOption(providerId, index));
+		const selected = await this.showExtensionSelector(`Select ${providerId} account`, options);
+		if (!selected) {
+			return undefined;
+		}
+
+		const selectedIndex = options.indexOf(selected);
+		if (selectedIndex === -1) {
+			return undefined;
+		}
+
+		const credentialIndex = oauthCredentialIndices[selectedIndex];
+		const changed = authStorage.setActiveCredentialIndex(providerId, credentialIndex);
+		if (!changed) {
+			return undefined;
+		}
+		this.usageService?.notifyRotation(providerId);
+		this.ui.requestRender();
+		return this.formatOAuthAccountOption(providerId, credentialIndex);
+	}
+
+	private async selectModelAndMaybeAccount(model: Model<any>): Promise<void> {
+		try {
+			await this.session.setModel(model);
+			const selectedAccount = await this.maybeSelectOAuthAccount(model.provider);
+			this.footer.invalidate();
+			this.updateEditorBorderColor();
+			this.showStatus(selectedAccount ? `Model: ${model.id} • ${selectedAccount}` : `Model: ${model.id}`);
+			this.checkDaxnutsEasterEgg(model);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	private async showModelsSelector(): Promise<void> {

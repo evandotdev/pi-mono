@@ -127,7 +127,7 @@ export type AgentSessionEvent =
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
-	| { type: "credential_rotate"; provider: string };
+	| { type: "credential_rotate"; provider: string; accountIdPrefix?: string };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -2442,7 +2442,14 @@ export class AgentSession {
 		if (this.model && this._isRateLimitError(message)) {
 			const rotated = this._modelRegistry.authStorage.rotateCredential(this.model.provider);
 			if (rotated) {
-				this._emit({ type: "credential_rotate", provider: this.model.provider });
+				const newCred = this._modelRegistry.authStorage.get(this.model.provider);
+				let accountIdPrefix: string | undefined;
+				if (newCred?.type === "oauth" && typeof newCred.accountId === "string") {
+					accountIdPrefix = newCred.accountId.slice(0, 4);
+				} else if (newCred?.type === "api_key") {
+					accountIdPrefix = newCred.key.slice(0, 4);
+				}
+				this._emit({ type: "credential_rotate", provider: this.model.provider, accountIdPrefix });
 			}
 		}
 
