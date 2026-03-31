@@ -110,25 +110,39 @@ export class FooterComponent implements Component {
 
 		// Build stats line
 		const statsParts = [];
-		if (totalInput) statsParts.push(`↑${formatTokens(totalInput)}`);
-		if (totalOutput) statsParts.push(`↓${formatTokens(totalOutput)}`);
-		if (totalCacheRead) statsParts.push(`R${formatTokens(totalCacheRead)}`);
-		if (totalCacheWrite) statsParts.push(`W${formatTokens(totalCacheWrite)}`);
+		if (totalInput) statsParts.push(`in ${formatTokens(totalInput)}`);
+		if (totalOutput) statsParts.push(`out ${formatTokens(totalOutput)}`);
+		if (totalCacheRead || totalCacheWrite) {
+			statsParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
+		}
 
 		// Show cost with "(sub)" indicator if using OAuth subscription
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		if (totalCost || usingSubscription) {
-			const costStr = `$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
-			statsParts.push(costStr);
+			statsParts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
 		}
 
 		// Show usage windows for OAuth providers that support it (e.g. Anthropic 5h/7d limits)
 		const providerUsage = this.footerData.getProviderUsage();
 		for (const [, usage] of providerUsage) {
 			const windowParts: string[] = [];
+			let earliestResetsAt: number | undefined;
 			for (const [windowName, window] of Object.entries(usage.windows)) {
 				const pct = Math.round(window.utilizationPercent);
 				windowParts.push(`${pct}%/${windowName}`);
+				if (window.resetsAt !== undefined) {
+					if (earliestResetsAt === undefined || window.resetsAt < earliestResetsAt) {
+						earliestResetsAt = window.resetsAt;
+					}
+				}
+			}
+			if (earliestResetsAt !== undefined) {
+				const remainingMs = earliestResetsAt - Date.now();
+				if (remainingMs > 0) {
+					const h = Math.floor(remainingMs / 3600000);
+					const m = Math.floor((remainingMs % 3600000) / 60000);
+					windowParts.push(h > 0 ? `reset ${h}h${m}m` : `reset ${m}m`);
+				}
 			}
 			if (windowParts.length > 0) {
 				statsParts.push(windowParts.join(" "));
