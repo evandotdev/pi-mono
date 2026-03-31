@@ -8,7 +8,7 @@
 
 import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
-import type { AuthStorage } from "./auth-storage.js";
+import type { AuthStorage, OAuthCredential } from "./auth-storage.js";
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -17,8 +17,16 @@ type CacheEntry = {
 	fetchedAt: number;
 };
 
+export type OAuthAccountUsage = {
+	credentialIndex: number;
+	accountId?: string;
+	usage: ProviderUsage;
+	active: boolean;
+};
+
 export class UsageService {
 	private cache = new Map<string, CacheEntry>();
+	private accountUsage = new Map<string, OAuthAccountUsage[]>();
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private disposed = false;
 
@@ -42,6 +50,38 @@ export class UsageService {
 		}
 	}
 
+	getAllAccountUsage(): ReadonlyMap<string, readonly OAuthAccountUsage[]> {
+		return this.accountUsage;
+	}
+
+	private getCacheKey(providerId: string, credentialIndex: number, accountId?: string): string {
+		return `${providerId}:${accountId ?? `index:${credentialIndex}`}`;
+	}
+
+	private async ensureFreshCredential(
+		providerId: string,
+		credentialIndex: number,
+		credential: OAuthCredential,
+	): Promise<OAuthCredential> {
+		if (Date.now() < credential.expires) {
+			return credential;
+		}
+
+		const provider = getOAuthProvider(providerId);
+		if (!provider) {
+			return credential;
+		}
+
+		try {
+			const refreshed = await provider.refreshToken(credential);
+			const nextCredential: OAuthCredential = { type: "oauth", ...refreshed };
+			this.authStorage.setCredentialAt(providerId, credentialIndex, nextCredential);
+			return nextCredential;
+		} catch {
+			return credential;
+		}
+	}
+
 	private scheduleNext(): void {
 		if (this.disposed) return;
 		this.timer = setTimeout(() => {
@@ -55,36 +95,55 @@ export class UsageService {
 
 	private async fetchAll(): Promise<void> {
 		for (const providerId of this.authStorage.list()) {
-			const cred = this.authStorage.get(providerId);
-			if (cred?.type !== "oauth") continue;
-
 			const provider = getOAuthProvider(providerId);
 			if (!provider?.fetchUsage) continue;
 
-			// Re-emit cached value immediately if still fresh
-			const cached = this.cache.get(providerId);
-			if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
-				this.onUsageUpdate(providerId, cached.usage);
-				continue;
-			}
+			const credentials = this.authStorage.getCredentials(providerId);
+			const activeIndex = this.authStorage.getActiveIndex(providerId);
+			const nextAccountUsage: OAuthAccountUsage[] = [];
 
-			// Ensure token is fresh (may trigger a refresh), then read full credentials
-			try {
-				await this.authStorage.getApiKey(providerId);
-			} catch {
-				continue;
-			}
-			const freshCred = this.authStorage.get(providerId);
-			if (freshCred?.type !== "oauth") continue;
+			for (let credentialIndex = 0; credentialIndex < credentials.length; credentialIndex++) {
+				const credential = credentials[credentialIndex];
+				if (!credential || credential.type !== "oauth") continue;
 
-			try {
-				const usage = await provider.fetchUsage(freshCred);
-				if (usage && !this.disposed) {
-					this.cache.set(providerId, { usage, fetchedAt: Date.now() });
+				const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
+				const cacheKey = this.getCacheKey(providerId, credentialIndex, accountId);
+				const cached = this.cache.get(cacheKey);
+				let usage: ProviderUsage | undefined;
+
+				if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+					usage = cached.usage;
+				} else {
+					const freshCredential = await this.ensureFreshCredential(providerId, credentialIndex, credential);
+					try {
+						const fetchedUsage = await provider.fetchUsage(freshCredential);
+						if (fetchedUsage && !this.disposed) {
+							this.cache.set(cacheKey, { usage: fetchedUsage, fetchedAt: Date.now() });
+							usage = fetchedUsage;
+						}
+					} catch {
+						usage = cached?.usage;
+					}
+				}
+
+				if (!usage) continue;
+
+				const active = credentialIndex === activeIndex;
+				nextAccountUsage.push({
+					credentialIndex,
+					accountId,
+					usage,
+					active,
+				});
+				if (active) {
 					this.onUsageUpdate(providerId, usage);
 				}
-			} catch {
-				// Silently ignore fetch errors; stale cache remains
+			}
+
+			if (nextAccountUsage.length > 0) {
+				this.accountUsage.set(providerId, nextAccountUsage);
+			} else {
+				this.accountUsage.delete(providerId);
 			}
 		}
 	}
