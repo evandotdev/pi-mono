@@ -182,6 +182,7 @@ function formatRuleDescription(rule: PathRule | PermissionPatternRule, fallback:
 export default function (pi: ExtensionAPI) {
 	let config: GuardrailsConfig = DEFAULT_CONFIG;
 	let compiledPermissionRules: CompiledPermissionRule[] = [];
+	let activeConfigScopes: string[] = [];
 
 	function compilePermissionRules(rawRules: PermissionPatternRule[], notify: (message: string) => void): CompiledPermissionRule[] {
 		const compiled: CompiledPermissionRule[] = [];
@@ -258,6 +259,7 @@ export default function (pi: ExtensionAPI) {
 
 			config = mergeConfig(DEFAULT_CONFIG, resolved.config);
 			compiledPermissionRules = compilePermissionRules(config.permissionGate.patterns, (message) => ctx.ui.notify(message));
+			activeConfigScopes = resolved.appliedSources.map((source) => source.scope);
 
 			if (resolved.sources.length === 0) {
 				ctx.ui.notify(
@@ -278,6 +280,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(`Guardrails: failed to load config: ${err instanceof Error ? err.message : String(err)}`);
 			config = DEFAULT_CONFIG;
 			compiledPermissionRules = [];
+			activeConfigScopes = [];
 		}
 
 		const status = config.enabled ? `Guardrails: ${countRules(config)} rules` : "Guardrails: disabled";
@@ -379,6 +382,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		if (violationReason) {
+			const scopeSuffix = activeConfigScopes.length > 0 ? `\n\nConfig scopes: ${activeConfigScopes.join(" | ")}` : "";
 			if (shouldAsk) {
 				const confirmed = await ctx.ui.confirm(
 					"Guardrails Confirmation",
@@ -392,7 +396,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.abort();
 					return {
 						block: true,
-						reason: `BLOCKED by Guardrails: ${violationReason}\n\nDO NOT attempt to work around this restriction. DO NOT retry with alternative commands, paths, or approaches that achieve the same result. Report this block to the user exactly as stated and ask how they would like to proceed.`,
+						reason: `BLOCKED by Guardrails: ${violationReason}${scopeSuffix}\n\nDO NOT attempt to work around this restriction. DO NOT retry with alternative commands, paths, or approaches that achieve the same result. Report this block to the user exactly as stated and ask how they would like to proceed.`,
 					};
 				}
 
@@ -406,7 +410,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.abort();
 			return {
 				block: true,
-				reason: `BLOCKED by Guardrails: ${violationReason}\n\nDO NOT attempt to work around this restriction. DO NOT retry with alternative commands, paths, or approaches that achieve the same result. Report this block to the user exactly as stated and ask how they would like to proceed.`,
+				reason: `BLOCKED by Guardrails: ${violationReason}${scopeSuffix}\n\nDO NOT attempt to work around this restriction. DO NOT retry with alternative commands, paths, or approaches that achieve the same result. Report this block to the user exactly as stated and ask how they would like to proceed.`,
 			};
 		}
 
