@@ -68,17 +68,17 @@ export class UsageService {
 				continue;
 			}
 
-			// Get a valid access token (may trigger a refresh)
-			let accessToken: string | undefined;
+			// Ensure token is fresh (may trigger a refresh), then read full credentials
 			try {
-				accessToken = await this.authStorage.getApiKey(providerId);
+				await this.authStorage.getApiKey(providerId);
 			} catch {
 				continue;
 			}
-			if (!accessToken) continue;
+			const freshCred = this.authStorage.get(providerId);
+			if (freshCred?.type !== "oauth") continue;
 
 			try {
-				const usage = await provider.fetchUsage(accessToken);
+				const usage = await provider.fetchUsage(freshCred);
 				if (usage && !this.disposed) {
 					this.cache.set(providerId, { usage, fetchedAt: Date.now() });
 					this.onUsageUpdate(providerId, usage);

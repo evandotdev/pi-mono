@@ -69,6 +69,9 @@ const session = runtimeHost.session;
 
 After runtime replacement, use `runtimeHost.session` as the new live session and rebind any session-local subscriptions or extension bindings.
 
+### Changed
+
+- `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 ### Added
 
 - Added public SDK runtime-host exports `createAgentSessionRuntime()` and `AgentSessionRuntimeHost` for apps that need runtime-backed session replacement and mode-style session switching

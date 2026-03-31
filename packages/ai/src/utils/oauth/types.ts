@@ -60,7 +60,7 @@ export interface OAuthProviderInterface {
 	getApiKey(credentials: OAuthCredentials): string;
 
 	/** Optional: fetch current usage/limit data for this provider */
-	fetchUsage?(accessToken: string): Promise<ProviderUsage | null>;
+	fetchUsage?(credentials: OAuthCredentials): Promise<ProviderUsage | null>;
 
 	/** Optional: modify models for this provider (e.g., update baseUrl) */
 	modifyModels?(models: Model<Api>[], credentials: OAuthCredentials): Model<Api>[];

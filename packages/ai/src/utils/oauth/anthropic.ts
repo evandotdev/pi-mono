@@ -406,13 +406,13 @@ export const anthropicOAuthProvider: OAuthProviderInterface = {
 		return credentials.access;
 	},
 
-	async fetchUsage(accessToken: string): Promise<ProviderUsage | null> {
+	async fetchUsage(credentials: OAuthCredentials): Promise<ProviderUsage | null> {
 		try {
 			const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
 				headers: {
 					Accept: "application/json",
 					"Content-Type": "application/json",
-					Authorization: `Bearer ${accessToken}`,
+					Authorization: `Bearer ${credentials.access}`,
 					"anthropic-beta": "oauth-2025-04-20",
 				},
 				signal: AbortSignal.timeout(5000),

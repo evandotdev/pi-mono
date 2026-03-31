@@ -19,7 +19,13 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
 
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.js";
 import { generatePKCE } from "./pkce.js";
-import type { OAuthCredentials, OAuthLoginCallbacks, OAuthPrompt, OAuthProviderInterface } from "./types.js";
+import type {
+	OAuthCredentials,
+	OAuthLoginCallbacks,
+	OAuthPrompt,
+	OAuthProviderInterface,
+	ProviderUsage,
+} from "./types.js";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
@@ -446,5 +452,87 @@ export const openaiCodexOAuthProvider: OAuthProviderInterface = {
 
 	getApiKey(credentials: OAuthCredentials): string {
 		return credentials.access;
+	},
+
+	async fetchUsage(credentials: OAuthCredentials): Promise<ProviderUsage | null> {
+		try {
+			const accountId = typeof credentials.accountId === "string" ? credentials.accountId : undefined;
+			if (!accountId) return null;
+
+			const userAgent =
+				typeof process !== "undefined" && process.platform && process.arch
+					? `pi (${process.platform} ${process.arch})`
+					: "pi (browser)";
+			const response = await fetch("https://chatgpt.com/backend-api/codex/usage", {
+				headers: {
+					Accept: "application/json",
+					Authorization: `Bearer ${credentials.access}`,
+					"chatgpt-account-id": accountId,
+					"User-Agent": userAgent,
+				},
+				signal: AbortSignal.timeout(5000),
+			});
+			if (!response.ok) return null;
+
+			type RateLimitWindow = {
+				used_percent?: number;
+				limit_window_seconds?: number;
+				reset_at?: number;
+			};
+			type RateLimitDetails = {
+				primary_window?: RateLimitWindow;
+				secondary_window?: RateLimitWindow;
+			};
+			const data = (await response.json()) as {
+				rate_limit?: RateLimitDetails;
+				additional_rate_limits?: Array<{
+					limit_name?: string;
+					rate_limit?: RateLimitDetails;
+				}>;
+			};
+
+			const formatDuration = (seconds: number): string => {
+				if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+				if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+				return `${Math.round(seconds / 86400)}d`;
+			};
+
+			const windows: Record<string, { utilizationPercent: number; resetsAt?: number }> = {};
+
+			const addWindow = (name: string, window: RateLimitWindow): void => {
+				if (window.used_percent === undefined) return;
+				windows[name] = {
+					utilizationPercent: window.used_percent,
+					resetsAt: window.reset_at !== undefined ? window.reset_at * 1000 : undefined,
+				};
+			};
+
+			const primary = data.rate_limit?.primary_window;
+			if (primary) {
+				const name =
+					primary.limit_window_seconds !== undefined ? formatDuration(primary.limit_window_seconds) : "primary";
+				addWindow(name, primary);
+			}
+
+			const secondary = data.rate_limit?.secondary_window;
+			if (secondary) {
+				const name =
+					secondary.limit_window_seconds !== undefined
+						? formatDuration(secondary.limit_window_seconds)
+						: "secondary";
+				addWindow(name, secondary);
+			}
+
+			for (const additional of data.additional_rate_limits ?? []) {
+				const pw = additional.rate_limit?.primary_window;
+				if (pw && additional.limit_name) {
+					addWindow(additional.limit_name, pw);
+				}
+			}
+
+			return Object.keys(windows).length > 0 ? { windows } : null;
+		} catch {
+			return null;
+		}
 	},
 };
