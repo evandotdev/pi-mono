@@ -2640,7 +2640,7 @@ export class InteractiveMode {
 			}
 
 			case "credential_rotate": {
-				this.usageService?.notifyRotation(event.provider);
+				void this.refreshUsageStatusline(event.provider);
 				this.retryCredentialAccountIdPrefix = event.accountIdPrefix;
 				break;
 			}
@@ -3574,30 +3574,7 @@ export class InteractiveMode {
 
 		const model = await this.findExactModelMatch(searchTerm);
 		if (model) {
-<<<<<<< HEAD
-			try {
-				await this.session.setModel(model);
-				this.footer.invalidate();
-				this.updateEditorBorderColor();
-				this.showStatus(`Model: ${model.id}`);
-				void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
-				this.checkDaxnutsEasterEgg(model);
-			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
-			}
-||||||| parent of 1499cd41 (chore: add account selector to model picker)
-			try {
-				await this.session.setModel(model);
-				this.footer.invalidate();
-				this.updateEditorBorderColor();
-				this.showStatus(`Model: ${model.id}`);
-				this.checkDaxnutsEasterEgg(model);
-			} catch (error) {
-				this.showError(error instanceof Error ? error.message : String(error));
-			}
-=======
 			await this.selectModelAndMaybeAccount(model);
->>>>>>> 1499cd41 (chore: add account selector to model picker)
 			return;
 		}
 
@@ -3658,6 +3635,22 @@ export class InteractiveMode {
 		}
 	}
 
+	/**
+	 * Refresh usage for one provider and push active account usage into the footer.
+	 * Called after account selection/login/logout/credential rotation.
+	 */
+	private async refreshUsageStatusline(providerId: string): Promise<void> {
+		if (!this.usageService) return;
+		await this.usageService.refreshProvider(providerId);
+		const activeUsage = this.usageService.getActiveUsage(providerId);
+		if (activeUsage) {
+			this.footerDataProvider.setProviderUsage(providerId, activeUsage);
+		} else {
+			this.footerDataProvider.clearProviderUsage(providerId);
+		}
+		this.footer.invalidate();
+		this.ui.requestRender();
+	}
 	private showModelSelector(initialSearchInput?: string): void {
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
@@ -3667,35 +3660,8 @@ export class InteractiveMode {
 				this.session.modelRegistry,
 				this.session.scopedModels,
 				async (model) => {
-<<<<<<< HEAD
-					try {
-						await this.session.setModel(model);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
-						done();
-						this.showStatus(`Model: ${model.id}`);
-						void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
-						this.checkDaxnutsEasterEgg(model);
-					} catch (error) {
-						done();
-						this.showError(error instanceof Error ? error.message : String(error));
-					}
-||||||| parent of 1499cd41 (chore: add account selector to model picker)
-					try {
-						await this.session.setModel(model);
-						this.footer.invalidate();
-						this.updateEditorBorderColor();
-						done();
-						this.showStatus(`Model: ${model.id}`);
-						this.checkDaxnutsEasterEgg(model);
-					} catch (error) {
-						done();
-						this.showError(error instanceof Error ? error.message : String(error));
-					}
-=======
 					done();
 					await this.selectModelAndMaybeAccount(model);
->>>>>>> 1499cd41 (chore: add account selector to model picker)
 				},
 				() => {
 					done();
@@ -3766,8 +3732,7 @@ export class InteractiveMode {
 		if (!changed) {
 			return undefined;
 		}
-		this.usageService?.notifyRotation(providerId);
-		this.ui.requestRender();
+		await this.refreshUsageStatusline(providerId);
 		return this.formatOAuthAccountOption(providerId, credentialIndex);
 	}
 
@@ -3775,9 +3740,11 @@ export class InteractiveMode {
 		try {
 			await this.session.setModel(model);
 			const selectedAccount = await this.maybeSelectOAuthAccount(model.provider);
+			await this.refreshUsageStatusline(model.provider);
 			this.footer.invalidate();
 			this.updateEditorBorderColor();
 			this.showStatus(selectedAccount ? `Model: ${model.id} • ${selectedAccount}` : `Model: ${model.id}`);
+			void this.maybeWarnAboutAnthropicSubscriptionAuth(model);
 			this.checkDaxnutsEasterEgg(model);
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
@@ -4130,6 +4097,7 @@ export class InteractiveMode {
 							}
 							this.session.modelRegistry.refresh();
 							await this.updateAvailableProviderCount();
+							await this.refreshUsageStatusline(providerId);
 							this.showStatus(`Logged out of ${providerName}`);
 						} catch (error: unknown) {
 							this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -4228,6 +4196,7 @@ export class InteractiveMode {
 			restoreEditor();
 			this.session.modelRegistry.refresh();
 			await this.updateAvailableProviderCount();
+			await this.refreshUsageStatusline(providerId);
 			const credCount = this.session.modelRegistry.authStorage.getCredentialCount(providerId);
 			const countInfo = credCount > 1 ? ` (${credCount} accounts)` : "";
 			this.showStatus(`Logged in to ${providerName}${countInfo}. Credentials saved to ${getAuthPath()}`);

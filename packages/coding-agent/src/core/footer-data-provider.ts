@@ -160,6 +160,13 @@ export class FooterDataProvider {
 		for (const cb of this.usageChangeCallbacks) cb();
 	}
 
+	/** Internal: clear usage for a provider */
+	clearProviderUsage(providerId: string): void {
+		if (!this.providerUsage.has(providerId)) return;
+		this.providerUsage.delete(providerId);
+		for (const cb of this.usageChangeCallbacks) cb();
+	}
+
 	/** Number of unique providers with available models (for footer display) */
 	getAvailableProviderCount(): number {
 		return this.availableProviderCount;
