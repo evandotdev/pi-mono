@@ -68,6 +68,11 @@ function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
 			void callback;
 			return () => {};
 		},
+		getProviderUsage: () => new Map(),
+		onUsageChange: (callback: () => void) => {
+			void callback;
+			return () => {};
+		},
 	};
 
 	return provider;

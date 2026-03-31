@@ -122,6 +122,19 @@ export class FooterComponent implements Component {
 			statsParts.push(costStr);
 		}
 
+		// Show usage windows for OAuth providers that support it (e.g. Anthropic 5h/7d limits)
+		const providerUsage = this.footerData.getProviderUsage();
+		for (const [, usage] of providerUsage) {
+			const windowParts: string[] = [];
+			for (const [windowName, window] of Object.entries(usage.windows)) {
+				const pct = Math.round(window.utilizationPercent);
+				windowParts.push(`${pct}%/${windowName}`);
+			}
+			if (windowParts.length > 0) {
+				statsParts.push(windowParts.join(" "));
+			}
+		}
+
 		// Colorize context percentage based on usage
 		let contextPercentStr: string;
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";

@@ -8,7 +8,13 @@
 import type { Server } from "node:http";
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.js";
 import { generatePKCE } from "./pkce.js";
-import type { OAuthCredentials, OAuthLoginCallbacks, OAuthPrompt, OAuthProviderInterface } from "./types.js";
+import type {
+	OAuthCredentials,
+	OAuthLoginCallbacks,
+	OAuthPrompt,
+	OAuthProviderInterface,
+	ProviderUsage,
+} from "./types.js";
 
 type CallbackServerInfo = {
 	server: Server;
@@ -398,5 +404,40 @@ export const anthropicOAuthProvider: OAuthProviderInterface = {
 
 	getApiKey(credentials: OAuthCredentials): string {
 		return credentials.access;
+	},
+
+	async fetchUsage(accessToken: string): Promise<ProviderUsage | null> {
+		try {
+			const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
+				headers: {
+					Accept: "application/json",
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${accessToken}`,
+					"anthropic-beta": "oauth-2025-04-20",
+				},
+				signal: AbortSignal.timeout(5000),
+			});
+			if (!response.ok) return null;
+			const data = (await response.json()) as {
+				five_hour?: { utilization?: number; resets_at?: string };
+				seven_day?: { utilization?: number; resets_at?: string };
+			};
+			const windows: Record<string, { utilizationPercent: number; resetsAt?: number }> = {};
+			if (data.five_hour?.utilization !== undefined) {
+				windows["5h"] = {
+					utilizationPercent: data.five_hour.utilization,
+					resetsAt: data.five_hour.resets_at ? new Date(data.five_hour.resets_at).getTime() : undefined,
+				};
+			}
+			if (data.seven_day?.utilization !== undefined) {
+				windows["7d"] = {
+					utilizationPercent: data.seven_day.utilization,
+					resetsAt: data.seven_day.resets_at ? new Date(data.seven_day.resets_at).getTime() : undefined,
+				};
+			}
+			return Object.keys(windows).length > 0 ? { windows } : null;
+		} catch {
+			return null;
+		}
 	},
 };

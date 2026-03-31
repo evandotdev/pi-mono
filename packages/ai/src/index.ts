@@ -29,6 +29,8 @@ export type {
 	OAuthProviderId,
 	OAuthProviderInfo,
 	OAuthProviderInterface,
+	ProviderUsage,
+	UsageWindow,
 } from "./utils/oauth/types.js";
 export * from "./utils/overflow.js";
 export * from "./utils/typebox-helpers.js";

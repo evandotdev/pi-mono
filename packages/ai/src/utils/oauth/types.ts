@@ -31,6 +31,18 @@ export interface OAuthLoginCallbacks {
 	signal?: AbortSignal;
 }
 
+export type UsageWindow = {
+	/** Utilization as a percentage (0–100) */
+	utilizationPercent: number;
+	/** When this window resets, epoch ms */
+	resetsAt?: number;
+};
+
+export type ProviderUsage = {
+	/** Named usage windows, e.g. "5h", "7d" */
+	windows: Record<string, UsageWindow>;
+};
+
 export interface OAuthProviderInterface {
 	readonly id: OAuthProviderId;
 	readonly name: string;
@@ -46,6 +58,9 @@ export interface OAuthProviderInterface {
 
 	/** Convert credentials to API key string for the provider */
 	getApiKey(credentials: OAuthCredentials): string;
+
+	/** Optional: fetch current usage/limit data for this provider */
+	fetchUsage?(accessToken: string): Promise<ProviderUsage | null>;
 
 	/** Optional: modify models for this provider (e.g., update baseUrl) */
 	modifyModels?(models: Model<Api>[], credentials: OAuthCredentials): Model<Api>[];

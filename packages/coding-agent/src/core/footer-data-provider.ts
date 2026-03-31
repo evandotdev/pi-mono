@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { type ExecFileException, execFile, spawnSync } from "child_process";
 import { existsSync, type FSWatcher, readFileSync, statSync, unwatchFile, watch, watchFile } from "fs";
 import { dirname, join, resolve } from "path";
@@ -88,6 +89,8 @@ export class FooterDataProvider {
 	private static readonly WATCH_DEBOUNCE_MS = 500;
 
 	private extensionStatuses = new Map<string, string>();
+	private providerUsage = new Map<string, ProviderUsage>();
+	private usageChangeCallbacks = new Set<() => void>();
 	private cachedBranch: string | null | undefined = undefined;
 	private gitPaths: GitPaths | null | undefined = undefined;
 	private headWatcher: FSWatcher | null = null;
@@ -140,6 +143,23 @@ export class FooterDataProvider {
 		this.extensionStatuses.clear();
 	}
 
+	/** Usage data per provider, keyed by provider ID */
+	getProviderUsage(): ReadonlyMap<string, ProviderUsage> {
+		return this.providerUsage;
+	}
+
+	/** Subscribe to provider usage changes. Returns unsubscribe function. */
+	onUsageChange(callback: () => void): () => void {
+		this.usageChangeCallbacks.add(callback);
+		return () => this.usageChangeCallbacks.delete(callback);
+	}
+
+	/** Internal: update usage for a provider */
+	setProviderUsage(providerId: string, usage: ProviderUsage): void {
+		this.providerUsage.set(providerId, usage);
+		for (const cb of this.usageChangeCallbacks) cb();
+	}
+
 	/** Number of unique providers with available models (for footer display) */
 	getAvailableProviderCount(): number {
 		return this.availableProviderCount;
@@ -185,6 +205,7 @@ export class FooterDataProvider {
 	/** Internal: cleanup */
 	dispose(): void {
 		this.disposed = true;
+		this.usageChangeCallbacks.clear();
 		if (this.refreshTimer) {
 			clearTimeout(this.refreshTimer);
 			this.refreshTimer = null;
@@ -335,5 +356,10 @@ export class FooterDataProvider {
 /** Read-only view for extensions - excludes setExtensionStatus, setAvailableProviderCount and dispose */
 export type ReadonlyFooterDataProvider = Pick<
 	FooterDataProvider,
-	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
+	| "getGitBranch"
+	| "getExtensionStatuses"
+	| "getAvailableProviderCount"
+	| "onBranchChange"
+	| "getProviderUsage"
+	| "onUsageChange"
 >;
