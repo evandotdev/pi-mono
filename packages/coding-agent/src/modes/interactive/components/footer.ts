@@ -28,7 +28,9 @@ function formatTokens(count: number): string {
 
 /**
  * Colorize OAuth provider utilization percentage based on utilization.
- * - >= 50%: yellow
+ * - 0-30%: green
+ * - 30-50%: light yellow
+ * - > 50%: yellow (warning)
  * - >= 70%: orange
  * - > 95%: red
  */
@@ -41,10 +43,14 @@ function colorizeProviderUsagePercent(percentText: string, utilizationPercent: n
 		const orange = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;149;0m" : "\x1b[38;5;208m";
 		return `${orange}${percentText}\x1b[39m`;
 	}
-	if (utilizationPercent >= 50) {
+	if (utilizationPercent > 50) {
 		return theme.fg("warning", percentText);
 	}
-	return percentText;
+	if (utilizationPercent > 30) {
+		const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
+		return `${lightYellow}${percentText}\x1b[39m`;
+	}
+	return theme.fg("success", percentText);
 }
 
 /**
@@ -143,37 +149,43 @@ export class FooterComponent implements Component {
 			statsParts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
 		}
 
-		// Show usage for the current model's OAuth provider only (e.g. Anthropic 5h limit).
-		// Only the window with the soonest reset is shown to keep the footer concise.
+		// Show usage for the current model's OAuth provider only (e.g. Anthropic).
+		// Render all known windows, sorted by soonest reset, in the form: 23%/5h 61%/7d  reset 3h11m
 		const currentProvider = state.model?.provider;
 		const providerUsage = this.footerData.getProviderUsage();
 		const currentUsage = currentProvider ? providerUsage.get(currentProvider) : undefined;
 		if (currentUsage) {
-			let primaryWindowName: string | undefined;
-			let primaryWindow: { utilizationPercent: number; resetsAt?: number } | undefined;
-			for (const [windowName, window] of Object.entries(currentUsage.windows)) {
-				if (
-					primaryWindow === undefined ||
-					(window.resetsAt !== undefined &&
-						(primaryWindow.resetsAt === undefined || window.resetsAt < primaryWindow.resetsAt))
-				) {
-					primaryWindowName = windowName;
-					primaryWindow = window;
-				}
-			}
-			if (primaryWindow && primaryWindowName) {
-				const pct = Math.round(primaryWindow.utilizationPercent);
-				const coloredPct = colorizeProviderUsagePercent(`${pct}%`, primaryWindow.utilizationPercent);
-				const parts = [`${coloredPct}/${primaryWindowName}`];
-				if (primaryWindow.resetsAt !== undefined) {
-					const remainingMs = primaryWindow.resetsAt - Date.now();
+			const windows = Object.entries(currentUsage.windows).sort((a, b) => {
+				const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+				const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+				if (resetA !== resetB) return resetA - resetB;
+				return a[0].localeCompare(b[0]);
+			});
+			if (windows.length > 0) {
+				const usageParts = windows.map(([windowName, window]) => {
+					const pct = Math.round(window.utilizationPercent);
+					const coloredPct = colorizeProviderUsagePercent(`${pct}%`, window.utilizationPercent);
+					return `${coloredPct}/${windowName}`;
+				});
+
+				const withReset = [...windows]
+					.map(([, window]) => window)
+					.filter((window) => window.resetsAt !== undefined)
+					.sort((a, b) => (a.resetsAt! < b.resetsAt! ? -1 : 1));
+				const soonestReset = withReset[0];
+
+				let usageSummary = usageParts.join(" ");
+				if (soonestReset?.resetsAt !== undefined) {
+					const remainingMs = soonestReset.resetsAt - Date.now();
 					if (remainingMs > 0) {
 						const h = Math.floor(remainingMs / 3600000);
 						const m = Math.floor((remainingMs % 3600000) / 60000);
-						parts.push(h > 0 ? `reset ${h}h${m}m` : `reset ${m}m`);
+						const resetText = h > 0 ? `reset ${h}h${m}m` : `reset ${m}m`;
+						usageSummary += `  ${resetText}`;
 					}
 				}
-				statsParts.push(parts.join(" "));
+
+				statsParts.push(usageSummary);
 			}
 		}
 
@@ -184,12 +196,19 @@ export class FooterComponent implements Component {
 			contextPercent === "?"
 				? `?/${formatTokens(contextWindow)}${autoIndicator}`
 				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
-		if (contextPercentValue > 90) {
+		if (contextPercent === "?") {
+			contextPercentStr = contextPercentDisplay;
+		} else if (contextPercentValue > 90) {
 			contextPercentStr = theme.fg("error", contextPercentDisplay);
 		} else if (contextPercentValue > 70) {
 			contextPercentStr = theme.fg("warning", contextPercentDisplay);
-		} else {
+		} else if (contextPercentValue > 50) {
 			contextPercentStr = contextPercentDisplay;
+		} else if (contextPercentValue > 30) {
+			const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
+			contextPercentStr = `${lightYellow}${contextPercentDisplay}\x1b[39m`;
+		} else {
+			contextPercentStr = theme.fg("success", contextPercentDisplay);
 		}
 		statsParts.push(contextPercentStr);
 
