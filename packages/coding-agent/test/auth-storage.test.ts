@@ -431,6 +431,425 @@ describe("AuthStorage", () => {
 		});
 	});
 
+	describe("multi-credential pool", () => {
+		test("addCredential creates array when provider already has a credential", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "key-1" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.addCredential("anthropic", { type: "api_key", key: "key-2" });
+
+			expect(authStorage.getCredentialCount("anthropic")).toBe(2);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-1" });
+
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8"));
+			expect(Array.isArray(raw.anthropic)).toBe(true);
+			expect(raw.anthropic).toHaveLength(2);
+		});
+
+		test("addCredential on empty provider stores single credential (not array)", () => {
+			writeAuthJson({});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.addCredential("anthropic", { type: "api_key", key: "key-1" });
+
+			expect(authStorage.getCredentialCount("anthropic")).toBe(1);
+
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8"));
+			expect(Array.isArray(raw.anthropic)).toBe(false);
+			expect(raw.anthropic.key).toBe("key-1");
+		});
+
+		test("get returns active credential based on index", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+					{ type: "api_key", key: "key-C" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-A" });
+			expect(authStorage.getActiveIndex("anthropic")).toBe(0);
+		});
+
+		test("rotateCredential cycles through credentials", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+					{ type: "api_key", key: "key-C" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			expect(authStorage.rotateCredential("anthropic")).toBe(true);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-B" });
+			expect(authStorage.getActiveIndex("anthropic")).toBe(1);
+
+			expect(authStorage.rotateCredential("anthropic")).toBe(true);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-C" });
+
+			// Wraps around
+			expect(authStorage.rotateCredential("anthropic")).toBe(true);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-A" });
+			expect(authStorage.getActiveIndex("anthropic")).toBe(0);
+		});
+
+		test("rotateCredential returns false for single credential", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "key-only" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			expect(authStorage.rotateCredential("anthropic")).toBe(false);
+		});
+
+		test("rotateCredential returns false for missing provider", () => {
+			writeAuthJson({});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			expect(authStorage.rotateCredential("anthropic")).toBe(false);
+		});
+
+		test("getApiKey returns key for active credential in pool", async () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			const key1 = await authStorage.getApiKey("anthropic");
+			expect(key1).toBe("key-A");
+
+			authStorage.rotateCredential("anthropic");
+
+			const key2 = await authStorage.getApiKey("anthropic");
+			expect(key2).toBe("key-B");
+		});
+
+		test("removeCredentialAt removes specific credential and adjusts pool", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+					{ type: "api_key", key: "key-C" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.removeCredentialAt("anthropic", 1);
+
+			expect(authStorage.getCredentialCount("anthropic")).toBe(2);
+			expect(authStorage.getCredentials("anthropic")).toEqual([
+				{ type: "api_key", key: "key-A" },
+				{ type: "api_key", key: "key-C" },
+			]);
+
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8"));
+			expect(raw.anthropic).toHaveLength(2);
+		});
+
+		test("removeCredentialAt collapses array to single credential when one left", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.removeCredentialAt("anthropic", 0);
+
+			expect(authStorage.getCredentialCount("anthropic")).toBe(1);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-B" });
+
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8"));
+			expect(Array.isArray(raw.anthropic)).toBe(false);
+			expect(raw.anthropic.key).toBe("key-B");
+		});
+
+		test("removeCredentialAt adjusts active index when removing before it", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+					{ type: "api_key", key: "key-C" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			// Rotate to key-C (index 2)
+			authStorage.rotateCredential("anthropic");
+			authStorage.rotateCredential("anthropic");
+			expect(authStorage.getActiveIndex("anthropic")).toBe(2);
+
+			// Remove last element, active index should clamp
+			authStorage.removeCredentialAt("anthropic", 2);
+			expect(authStorage.getActiveIndex("anthropic")).toBe(1);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-B" });
+		});
+
+		test("remove clears all credentials and active index", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.rotateCredential("anthropic");
+			authStorage.remove("anthropic");
+
+			expect(authStorage.has("anthropic")).toBe(false);
+			expect(authStorage.getCredentialCount("anthropic")).toBe(0);
+			expect(authStorage.get("anthropic")).toBeUndefined();
+		});
+
+		test("set replaces entire pool with single credential", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.rotateCredential("anthropic");
+			authStorage.set("anthropic", { type: "api_key", key: "key-new" });
+
+			expect(authStorage.getCredentialCount("anthropic")).toBe(1);
+			expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "key-new" });
+			expect(authStorage.getActiveIndex("anthropic")).toBe(0);
+		});
+
+		test("getCredentials returns full array for pool", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			const creds = authStorage.getCredentials("anthropic");
+			expect(creds).toHaveLength(2);
+			expect(creds[0]).toEqual({ type: "api_key", key: "key-A" });
+			expect(creds[1]).toEqual({ type: "api_key", key: "key-B" });
+		});
+
+		test("getCredentials returns single-element array for non-pool", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "key-only" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			const creds = authStorage.getCredentials("anthropic");
+			expect(creds).toHaveLength(1);
+			expect(creds[0]).toEqual({ type: "api_key", key: "key-only" });
+		});
+
+		test("login replaces credential with matching accountId", async () => {
+			const providerId = `test-accountid-replace-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+			let callCount = 0;
+			registerOAuthProvider({
+				id: providerId,
+				name: "Test AccountId Provider",
+				async login() {
+					callCount++;
+					return {
+						refresh: `refresh-${callCount}`,
+						access: `access-${callCount}`,
+						expires: Date.now() + 60_000,
+						accountId: callCount === 1 ? "account-A" : "account-B",
+					};
+				},
+				async refreshToken(credentials) {
+					return credentials;
+				},
+				getApiKey(credentials) {
+					return credentials.access;
+				},
+			});
+
+			writeAuthJson({});
+			authStorage = AuthStorage.create(authJsonPath);
+
+			const callbacks = {
+				onAuth: () => {},
+				onPrompt: async () => "",
+			};
+
+			// First login: account-A (callCount=1, access-1)
+			await authStorage.login(providerId, callbacks);
+			expect(authStorage.getCredentialCount(providerId)).toBe(1);
+
+			// Second login: account-B (callCount=2, access-2) — different account, appended
+			await authStorage.login(providerId, callbacks);
+			expect(authStorage.getCredentialCount(providerId)).toBe(2);
+
+			// Third login: account-B again (callCount=3, access-3) — same accountId, replaces index 1
+			await authStorage.login(providerId, callbacks);
+			expect(authStorage.getCredentialCount(providerId)).toBe(2);
+
+			const all = authStorage.getCredentials(providerId);
+			expect(all[0]).toMatchObject({ accountId: "account-A", access: "access-1" });
+			expect(all[1]).toMatchObject({ accountId: "account-B", access: "access-3" });
+		});
+
+		test("login appends to existing credentials via addCredential", async () => {
+			const providerId = `test-login-pool-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+			let callCount = 0;
+			registerOAuthProvider({
+				id: providerId,
+				name: "Test Pool Provider",
+				async login() {
+					callCount++;
+					return {
+						refresh: `refresh-${callCount}`,
+						access: `access-${callCount}`,
+						expires: Date.now() + 60_000,
+					};
+				},
+				async refreshToken(credentials) {
+					return credentials;
+				},
+				getApiKey(credentials) {
+					return credentials.access;
+				},
+			});
+
+			writeAuthJson({});
+			authStorage = AuthStorage.create(authJsonPath);
+
+			const callbacks = {
+				onAuth: () => {},
+				onPrompt: async () => "",
+			};
+
+			// First login
+			await authStorage.login(providerId, callbacks);
+			expect(authStorage.getCredentialCount(providerId)).toBe(1);
+
+			// Second login appends
+			await authStorage.login(providerId, callbacks);
+			expect(authStorage.getCredentialCount(providerId)).toBe(2);
+
+			// Both credentials are available
+			const key1 = await authStorage.getApiKey(providerId);
+			expect(key1).toBe("access-1");
+
+			authStorage.rotateCredential(providerId);
+			const key2 = await authStorage.getApiKey(providerId);
+			expect(key2).toBe("access-2");
+		});
+
+		test("oauth refresh works for specific credential in pool", async () => {
+			const providerId = `test-refresh-pool-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+			registerOAuthProvider({
+				id: providerId,
+				name: "Test Refresh Pool",
+				async login() {
+					throw new Error("Not used");
+				},
+				async refreshToken(credentials) {
+					return {
+						...credentials,
+						access: `refreshed-${credentials.refresh}`,
+						expires: Date.now() + 60_000,
+					};
+				},
+				getApiKey(credentials) {
+					return credentials.access;
+				},
+			});
+
+			writeAuthJson({
+				[providerId]: [
+					{
+						type: "oauth",
+						refresh: "refresh-1",
+						access: "valid-access-1",
+						expires: Date.now() + 60_000,
+					},
+					{
+						type: "oauth",
+						refresh: "refresh-2",
+						access: "expired-access-2",
+						expires: Date.now() - 10_000,
+					},
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+
+			// First credential is valid
+			const key1 = await authStorage.getApiKey(providerId);
+			expect(key1).toBe("valid-access-1");
+
+			// Rotate to expired credential - should auto-refresh
+			authStorage.rotateCredential(providerId);
+			const key2 = await authStorage.getApiKey(providerId);
+			expect(key2).toBe("refreshed-refresh-2");
+
+			// Verify only the second credential was refreshed on disk
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8"));
+			const arr = raw[providerId];
+			expect(arr).toHaveLength(2);
+			expect(arr[0].access).toBe("valid-access-1");
+			expect(arr[1].access).toBe("refreshed-refresh-2");
+		});
+
+		test("has and hasAuth work with credential pools", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			expect(authStorage.has("anthropic")).toBe(true);
+			expect(authStorage.hasAuth("anthropic")).toBe(true);
+			expect(authStorage.has("openai")).toBe(false);
+		});
+
+		test("list returns providers with credential pools", () => {
+			writeAuthJson({
+				anthropic: [
+					{ type: "api_key", key: "key-A" },
+					{ type: "api_key", key: "key-B" },
+				],
+				openai: { type: "api_key", key: "key-openai" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			expect(authStorage.list()).toEqual(["anthropic", "openai"]);
+		});
+
+		test("addCredential persists array to disk preserving unrelated providers", () => {
+			writeAuthJson({
+				anthropic: { type: "api_key", key: "key-A" },
+				openai: { type: "api_key", key: "key-openai" },
+			});
+
+			authStorage = AuthStorage.create(authJsonPath);
+			authStorage.addCredential("anthropic", { type: "api_key", key: "key-B" });
+
+			const raw = JSON.parse(readFileSync(authJsonPath, "utf-8"));
+			expect(raw.anthropic).toHaveLength(2);
+			expect(raw.openai.key).toBe("key-openai");
+		});
+	});
+
 	describe("runtime overrides", () => {
 		test("runtime override takes priority over auth.json", async () => {
 			writeAuthJson({
