@@ -27,6 +27,27 @@ function formatTokens(count: number): string {
 }
 
 /**
+ * Colorize OAuth provider utilization percentage based on utilization.
+ * - >= 50%: yellow
+ * - >= 70%: orange
+ * - > 95%: red
+ */
+function colorizeProviderUsagePercent(percentText: string, utilizationPercent: number): string {
+	if (utilizationPercent > 95) {
+		return theme.fg("error", percentText);
+	}
+	if (utilizationPercent >= 70) {
+		// Orange between warning and error (truecolor when available, fallback to ANSI-256 orange)
+		const orange = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;149;0m" : "\x1b[38;5;208m";
+		return `${orange}${percentText}\x1b[39m`;
+	}
+	if (utilizationPercent >= 50) {
+		return theme.fg("warning", percentText);
+	}
+	return percentText;
+}
+
+/**
  * Footer component that shows pwd, token stats, and context usage.
  * Computes token/context stats from session, gets git branch and extension statuses from provider.
  */
@@ -142,7 +163,8 @@ export class FooterComponent implements Component {
 			}
 			if (primaryWindow && primaryWindowName) {
 				const pct = Math.round(primaryWindow.utilizationPercent);
-				const parts = [`${pct}%/${primaryWindowName}`];
+				const coloredPct = colorizeProviderUsagePercent(`${pct}%`, primaryWindow.utilizationPercent);
+				const parts = [`${coloredPct}/${primaryWindowName}`];
 				if (primaryWindow.resetsAt !== undefined) {
 					const remainingMs = primaryWindow.resetsAt - Date.now();
 					if (remainingMs > 0) {
