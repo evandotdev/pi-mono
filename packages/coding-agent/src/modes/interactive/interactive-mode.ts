@@ -3990,6 +3990,7 @@ export class InteractiveMode {
 			const selector = new OAuthSelectorComponent(
 				mode,
 				this.session.modelRegistry.authStorage,
+				this.usageService?.getAllAccountUsage() ?? new Map(),
 				async (providerId: string, targetIndex: number | null) => {
 					done();
 

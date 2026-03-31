@@ -1,7 +1,8 @@
-import type { OAuthProviderInterface } from "@mariozechner/pi-ai";
+import type { OAuthProviderInterface, ProviderUsage } from "@mariozechner/pi-ai";
 import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import { Container, getKeybindings, Spacer, TruncatedText } from "@mariozechner/pi-tui";
 import type { AuthCredential, AuthStorage } from "../../../core/auth-storage.js";
+import type { OAuthAccountUsage } from "../../../core/usage-service.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 
@@ -42,18 +43,21 @@ export class OAuthSelectorComponent extends Container {
 	private selectableRows: SelectableRow[] = [];
 	private mode: "login" | "logout";
 	private authStorage: AuthStorage;
+	private providerAccountUsage: ReadonlyMap<string, readonly OAuthAccountUsage[]>;
 	private onSelectCallback: (providerId: string, targetIndex: number | null) => void;
 	private onCancelCallback: () => void;
 
 	constructor(
 		mode: "login" | "logout",
 		authStorage: AuthStorage,
+		providerAccountUsage: ReadonlyMap<string, readonly OAuthAccountUsage[]>,
 		onSelect: (providerId: string, targetIndex: number | null) => void,
 		onCancel: () => void,
 	) {
 		super();
 		this.mode = mode;
 		this.authStorage = authStorage;
+		this.providerAccountUsage = providerAccountUsage;
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
@@ -75,11 +79,42 @@ export class OAuthSelectorComponent extends Container {
 		this.renderList();
 	}
 
-	private accountLabel(cred: AuthCredential, index: number): string {
+	private colorizeUsagePercent(percent: number): string {
+		const label = `${Math.round(percent)}%`;
+		if (percent > 95) return theme.fg("error", label);
+		if (percent >= 70) return theme.fg("warning", label);
+		if (percent >= 50) return theme.fg("accent", label);
+		return theme.fg("dim", label);
+	}
+
+	private formatUsageLabel(usage: ProviderUsage): string {
+		const windows = Object.entries(usage.windows).sort((a, b) => {
+			const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+			const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+			if (resetA !== resetB) return resetA - resetB;
+			return a[0].localeCompare(b[0]);
+		});
+		return windows
+			.map(([windowName, window]) => `${windowName} ${this.colorizeUsagePercent(window.utilizationPercent)}`)
+			.join(theme.fg("dim", " · "));
+	}
+
+	private getUsageEntry(providerId: string, credentialIndex: number): OAuthAccountUsage | undefined {
+		return this.providerAccountUsage.get(providerId)?.find((entry) => entry.credentialIndex === credentialIndex);
+	}
+
+	private getUsageLabel(providerId: string, credentialIndex: number): string {
+		const usageEntry = this.getUsageEntry(providerId, credentialIndex);
+		if (!usageEntry) return "";
+		const activeLabel = usageEntry.active ? ` ${theme.fg("success", "active")}` : "";
+		return `  ${this.formatUsageLabel(usageEntry.usage)}${activeLabel}`;
+	}
+
+	private accountLabel(providerId: string, cred: AuthCredential, index: number): string {
 		const accountId =
 			cred.type === "oauth" && typeof cred.accountId === "string" ? (cred.accountId as string) : undefined;
 		const idSuffix = accountId ? `  ${theme.fg("dim", accountId.slice(0, 8))}` : "";
-		return `Account ${index + 1}${idSuffix}`;
+		return `Account ${index + 1}${idSuffix}${this.getUsageLabel(providerId, index)}`;
 	}
 
 	private buildRows(): void {
@@ -92,7 +127,6 @@ export class OAuthSelectorComponent extends Container {
 
 			if (this.mode === "login") {
 				if (oauthCreds.length === 0) {
-					// No existing credentials — provider row is directly selectable
 					const row: SelectableRow = {
 						kind: "selectable",
 						text: provider.name,
@@ -102,30 +136,26 @@ export class OAuthSelectorComponent extends Container {
 					this.rows.push(row);
 					this.selectableRows.push(row);
 				} else {
-					// Header (non-selectable)
 					const count = oauthCreds.length;
 					this.rows.push({
 						kind: "header",
 						text: `${provider.name}  ${theme.fg("success", `✓ ${count} account${count > 1 ? "s" : ""}`)}`,
 					});
-					// One row per existing credential
 					for (let i = 0; i < creds.length; i++) {
-						const c = creds[i]!;
-						if (c.type !== "oauth") continue;
-						const credIdx = i;
+						const credential = creds[i];
+						if (!credential || credential.type !== "oauth") continue;
 						const row: SelectableRow = {
 							kind: "selectable",
-							text: `  ${this.accountLabel(c, credIdx)}`,
+							text: `  ${this.accountLabel(provider.id, credential, i)}`,
 							providerId: provider.id,
-							targetIndex: credIdx,
+							targetIndex: i,
 						};
 						this.rows.push(row);
 						this.selectableRows.push(row);
 					}
-					// Add new account
 					const addRow: SelectableRow = {
 						kind: "selectable",
-						text: `  + Add new account`,
+						text: "  + Add new account",
 						providerId: provider.id,
 						targetIndex: null,
 					};
@@ -133,37 +163,34 @@ export class OAuthSelectorComponent extends Container {
 					this.selectableRows.push(addRow);
 				}
 			} else {
-				// Logout mode — only show providers with credentials
 				if (oauthCreds.length === 0) continue;
 
 				if (oauthCreds.length === 1) {
-					// Single credential — provider row is directly selectable
-					const cred = oauthCreds[0]!;
-					const credIdx = creds.indexOf(cred);
+					const credential = oauthCreds[0]!;
+					const credentialIndex = creds.indexOf(credential);
 					const idSuffix =
-						cred.type === "oauth" && typeof cred.accountId === "string"
-							? `  ${theme.fg("dim", (cred.accountId as string).slice(0, 8))}`
+						credential.type === "oauth" && typeof credential.accountId === "string"
+							? `  ${theme.fg("dim", credential.accountId.slice(0, 8))}`
 							: "";
 					const row: SelectableRow = {
 						kind: "selectable",
-						text: `${provider.name}${idSuffix}  ${theme.fg("success", "✓ logged in")}`,
+						text: `${provider.name}${idSuffix}  ${theme.fg("success", "✓ logged in")}${this.getUsageLabel(provider.id, credentialIndex)}`,
 						providerId: provider.id,
-						targetIndex: credIdx,
+						targetIndex: credentialIndex,
 					};
 					this.rows.push(row);
 					this.selectableRows.push(row);
 				} else {
-					// Multiple credentials — header + per-account rows
 					this.rows.push({
 						kind: "header",
 						text: `${provider.name}  ${theme.fg("success", `✓ ${oauthCreds.length} accounts`)}`,
 					});
 					for (let i = 0; i < creds.length; i++) {
-						const c = creds[i]!;
-						if (c.type !== "oauth") continue;
+						const credential = creds[i];
+						if (!credential || credential.type !== "oauth") continue;
 						const row: SelectableRow = {
 							kind: "selectable",
-							text: `  ${this.accountLabel(c, i)}`,
+							text: `  ${this.accountLabel(provider.id, credential, i)}`,
 							providerId: provider.id,
 							targetIndex: i,
 						};
@@ -184,7 +211,6 @@ export class OAuthSelectorComponent extends Container {
 			});
 		}
 
-		// Clamp selectedIndex
 		if (this.selectedIndex >= this.selectableRows.length) {
 			this.selectedIndex = Math.max(0, this.selectableRows.length - 1);
 		}
@@ -202,7 +228,6 @@ export class OAuthSelectorComponent extends Container {
 				const isSelected = row === selectedSelectable;
 				let line: string;
 				if (isSelected) {
-					// Strip any leading spaces used for indentation, replace with arrow
 					const indented = row.text.startsWith("  ");
 					const prefix = indented ? theme.fg("accent", "  → ") : theme.fg("accent", "→ ");
 					const body = theme.fg("accent", row.text.trimStart());
