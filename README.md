@@ -56,7 +56,7 @@ I regularly publish my own `pi-mono` work sessions here:
 ### Custom Extensions
 
 - [grep-home-shorten.ts](.pi/extensions/grep-home-shorten.ts) truncates your `$HOME` variable into `~` to save tokens
-- [guardrails.ts](.pi/extensions/guardrails.ts) prevents risky commands like `sudo` or `rm -rf ...` with repo-default/project/global scope
+- [guardrails.ts](.pi/extensions/guardrails.ts) blocks risky path and command patterns (for example `sudo` or `rm -rf`) with layered `repo-default`/`project`/`global` config scopes
 
 #### Provided Extensions
 
@@ -67,11 +67,14 @@ I regularly publish my own `pi-mono` work sessions here:
 - [prompt-url-widget.ts](.pi/extensions/prompt-url-widget.ts)
 
 ### Enhancements
-- credential load balancing via different providers (anthropic, openai)
-  - /model allows you to show which provider to use
-  - /login updated to list multiple accounts per provider
-  - automatic credential rotation on rate-limit/overload retry
-- 5h, 7d usage limits directly displayed in statusline
+
+- OAuth multi-account load balancing for Anthropic and OpenAI Codex
+  - multiple saved accounts per provider with account-aware deduplication
+  - account selection directly in `/login` and `/model`
+  - automatic credential rotation on retryable rate-limit/overload responses (with notification)
+- Interactive usage telemetry
+  - footer shows provider usage windows (e.g. `5h`, `1d`, `7d`) with reset timing
+  - `/login` shows per-account usage metrics to make account switching explicit
 
 ## Contributing
 

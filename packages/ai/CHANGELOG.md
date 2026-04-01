@@ -9,6 +9,11 @@
 ### Added
 
 - Added `fetchUsage` to `openaiCodexOAuthProvider`, fetching rate-limit utilization from `https://chatgpt.com/api/codex/usage` and exposing primary/secondary windows (e.g. `1h`, `1d`) plus any additional named limits in the status line.
+- Added `fetchUsage` to `anthropicOAuthProvider`, fetching Claude subscription utilization from `https://api.anthropic.com/api/oauth/usage` and exposing `5h` and `7d` windows for consumers such as footer and login UIs.
+
+### Changed
+
+- OAuth credential handling for Anthropic and OpenAI Codex now persists provider account identifiers on credentials (for example `accountId`) so multi-account clients can deduplicate logins and request account-scoped usage data.
 
 ## [0.67.2] - 2026-04-14
 
