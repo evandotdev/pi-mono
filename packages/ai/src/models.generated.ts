@@ -10411,7 +10411,7 @@ export const MODELS = {
 				cacheWrite: 0,
 			},
 			contextWindow: 1000000,
-			maxTokens: 65536,
+			maxTokens: 32000,
 		} satisfies Model<"openai-completions">,
 		"qwen/qwen3.6-plus": {
 			id: "qwen/qwen3.6-plus",

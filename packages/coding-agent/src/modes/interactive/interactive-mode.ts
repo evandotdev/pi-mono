@@ -2252,6 +2252,11 @@ export class InteractiveMode {
 				await this.handleReloadCommand();
 				return;
 			}
+			if (text === "/generate-models") {
+				this.editor.setText("");
+				await this.handleGenerateModelsCommand();
+				return;
+			}
 			if (text === "/debug") {
 				this.handleDebugCommand();
 				this.editor.setText("");
@@ -4213,6 +4218,55 @@ export class InteractiveMode {
 	// Command handlers
 	// =========================================================================
 
+	private findPiAiPackageDir(startDir: string): string | undefined {
+		let current = startDir;
+
+		while (true) {
+			const workspaceCandidate = path.join(current, "packages", "ai", "package.json");
+			if (fs.existsSync(workspaceCandidate)) {
+				return path.dirname(workspaceCandidate);
+			}
+
+			const packageJsonPath = path.join(current, "package.json");
+			if (fs.existsSync(packageJsonPath)) {
+				try {
+					const packageJsonRaw = fs.readFileSync(packageJsonPath, "utf-8");
+					const packageJson = JSON.parse(packageJsonRaw) as { name?: string };
+					if (packageJson.name === "@mariozechner/pi-ai") {
+						return current;
+					}
+				} catch {
+					// Ignore parse errors while walking up directories
+				}
+			}
+
+			const parent = path.dirname(current);
+			if (parent === current) {
+				return undefined;
+			}
+			current = parent;
+		}
+	}
+
+	private quoteShellArg(value: string): string {
+		return `'${value.replace(/'/g, "'\"'\"'")}'`;
+	}
+
+	private async handleGenerateModelsCommand(): Promise<void> {
+		if (this.session.isBashRunning) {
+			this.showWarning("A bash command is already running. Press Esc to cancel it first.");
+			return;
+		}
+
+		const aiPackageDir = this.findPiAiPackageDir(this.sessionManager.getCwd());
+		if (!aiPackageDir) {
+			this.showError("Could not locate packages/ai. Run this command from the pi-mono repository.");
+			return;
+		}
+
+		await this.handleBashCommand(`cd ${this.quoteShellArg(aiPackageDir)} && npm run generate-models`);
+	}
+
 	private async handleReloadCommand(): Promise<void> {
 		if (this.session.isStreaming) {
 			this.showWarning("Wait for the current response to finish before reloading.");
@@ -4662,6 +4716,8 @@ export class InteractiveMode {
 | \`!!\` | Run bash command (excluded from context) |
 `;
 
+		const escapeMarkdownCell = (value: string): string => value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+
 		// Add extension-registered shortcuts
 		const extensionRunner = this.session.extensionRunner;
 		if (extensionRunner) {
@@ -4675,8 +4731,36 @@ export class InteractiveMode {
 				for (const [key, shortcut] of shortcuts) {
 					const description = shortcut.description ?? shortcut.extensionPath;
 					const keyDisplay = key.replace(/\b\w/g, (c) => c.toUpperCase());
-					hotkeys += `| \`${keyDisplay}\` | ${description} |\n`;
+					hotkeys += `| \`${keyDisplay}\` | ${escapeMarkdownCell(description)} |\n`;
 				}
+			}
+		}
+
+		// Add slash commands (built-in + extension + prompts + skills)
+		hotkeys += `
+**Slash Commands**
+| Command | Source | Description |
+|---------|--------|-------------|
+`;
+		for (const command of BUILTIN_SLASH_COMMANDS) {
+			hotkeys += `| \`/${command.name}\` | built-in | ${escapeMarkdownCell(command.description)} |\n`;
+		}
+
+		if (extensionRunner) {
+			for (const command of extensionRunner.getRegisteredCommands()) {
+				const description = command.description ?? "";
+				hotkeys += `| \`/${command.invocationName}\` | extension | ${escapeMarkdownCell(description)} |\n`;
+			}
+		}
+
+		for (const template of this.session.promptTemplates) {
+			const description = template.description ?? "";
+			hotkeys += `| \`/${template.name}\` | prompt | ${escapeMarkdownCell(description)} |\n`;
+		}
+
+		if (this.settingsManager.getEnableSkillCommands()) {
+			for (const skill of this.session.resourceLoader.getSkills().skills) {
+				hotkeys += `| \`/skill:${skill.name}\` | skill | ${escapeMarkdownCell(skill.description)} |\n`;
 			}
 		}
 
