@@ -26,8 +26,11 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
+// Workaround for bad control characters in SSE streams from Anthropic API.
+// https://github.com/anthropics/anthropic-sdk-typescript/issues/882
+// https://github.com/badlogic/pi-mono/issues/2681
+import { createSanitizingFetch } from "../utils/sanitize-sse-fetch.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { adjustMaxTokensForThinking, buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
@@ -543,10 +546,13 @@ function createClient(
 			betaFeatures.push("interleaved-thinking-2025-05-14");
 		}
 
+		const sanitizedFetch = createSanitizingFetch();
+
 		const client = new Anthropic({
 			apiKey: null,
 			authToken: apiKey,
 			baseURL: model.baseUrl,
+			fetch: sanitizedFetch,
 			dangerouslyAllowBrowser: true,
 			defaultHeaders: mergeHeaders(
 				{
@@ -568,12 +574,15 @@ function createClient(
 		betaFeatures.push("interleaved-thinking-2025-05-14");
 	}
 
+	const sanitizedFetch = createSanitizingFetch();
+
 	// OAuth: Bearer auth, Claude Code identity headers
 	if (isOAuthToken(apiKey)) {
 		const client = new Anthropic({
 			apiKey: null,
 			authToken: apiKey,
 			baseURL: model.baseUrl,
+			fetch: sanitizedFetch,
 			dangerouslyAllowBrowser: true,
 			defaultHeaders: mergeHeaders(
 				{
@@ -595,6 +604,7 @@ function createClient(
 	const client = new Anthropic({
 		apiKey,
 		baseURL: model.baseUrl,
+		fetch: sanitizedFetch,
 		dangerouslyAllowBrowser: true,
 		defaultHeaders: mergeHeaders(
 			{
