@@ -4,7 +4,8 @@ export type SandboxConfig = { type: "host" } | { type: "docker"; container: stri
 
 export function parseSandboxArg(value: string): SandboxConfig {
 	if (value === "host") {
-		return { type: "host" };
+		console.error("Error: Host mode is disabled. Use 'docker:<container-name>'");
+		process.exit(1);
 	}
 	if (value.startsWith("docker:")) {
 		const container = value.slice("docker:".length);
@@ -14,7 +15,7 @@ export function parseSandboxArg(value: string): SandboxConfig {
 		}
 		return { type: "docker", container };
 	}
-	console.error(`Error: Invalid sandbox type '${value}'. Use 'host' or 'docker:<container-name>'`);
+	console.error(`Error: Invalid sandbox type '${value}'. Use 'docker:<container-name>'`);
 	process.exit(1);
 }
 

@@ -18,13 +18,13 @@ const MOM_SLACK_BOT_TOKEN = process.env.MOM_SLACK_BOT_TOKEN;
 
 interface ParsedArgs {
 	workingDir?: string;
-	sandbox: SandboxConfig;
+	sandbox?: SandboxConfig;
 	downloadChannel?: string;
 }
 
 function parseArgs(): ParsedArgs {
 	const args = process.argv.slice(2);
-	let sandbox: SandboxConfig = { type: "host" };
+	let sandbox: SandboxConfig | undefined;
 	let workingDir: string | undefined;
 	let downloadChannelId: string | undefined;
 
@@ -62,10 +62,15 @@ if (parsedArgs.downloadChannel) {
 	process.exit(0);
 }
 
-// Normal bot mode - require working dir
-if (!parsedArgs.workingDir) {
-	console.error("Usage: mom [--sandbox=host|docker:<name>] <working-directory>");
+// Normal bot mode - require docker sandbox and working dir
+if (!parsedArgs.workingDir || !parsedArgs.sandbox) {
+	console.error("Usage: mom --sandbox=docker:<name> <working-directory>");
 	console.error("       mom --download <channel-id>");
+	process.exit(1);
+}
+
+if (parsedArgs.sandbox.type !== "docker") {
+	console.error("Error: Host mode is disabled. Use --sandbox=docker:<name>");
 	process.exit(1);
 }
 
@@ -335,7 +340,7 @@ const handler: MomHandler = {
 // Start
 // ============================================================================
 
-log.logStartup(workingDir, sandbox.type === "host" ? "host" : `docker:${sandbox.container}`);
+log.logStartup(workingDir, `docker:${sandbox.container}`);
 
 // Shared store for attachment downloads (also used per-channel in getState)
 const sharedStore = new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN! });

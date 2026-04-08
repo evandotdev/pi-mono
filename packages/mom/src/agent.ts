@@ -1,5 +1,5 @@
-import { Agent, type AgentEvent } from "@mariozechner/pi-agent-core";
-import { getModel, type ImageContent } from "@mariozechner/pi-ai";
+import { Agent, type AgentEvent, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { type Api, getModel, type ImageContent, type Model } from "@mariozechner/pi-ai";
 import {
 	AgentSession,
 	AuthStorage,
@@ -42,18 +42,6 @@ export interface AgentRunner {
 	abort(): void;
 }
 
-async function getAnthropicApiKey(authStorage: AuthStorage): Promise<string> {
-	const key = await authStorage.getApiKey("anthropic");
-	if (!key) {
-		throw new Error(
-			"No API key found for anthropic.\n\n" +
-				"Set an API key environment variable, or use /login with Anthropic and link to auth.json from " +
-				join(homedir(), ".pi", "mom", "auth.json"),
-		);
-	}
-	return key;
-}
-
 const IMAGE_MIME_TYPES: Record<string, string> = {
 	jpg: "image/jpeg",
 	jpeg: "image/jpeg",
@@ -64,6 +52,62 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 
 function getImageMimeType(filename: string): string | undefined {
 	return IMAGE_MIME_TYPES[filename.toLowerCase().split(".").pop() || ""];
+}
+
+const THINKING_LEVEL_ORDER: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+function formatModelReference(model: Model<Api>): string {
+	return `${model.provider}/${model.id}`;
+}
+
+function findExactModelReferenceMatch(modelReference: string, availableModels: Model<Api>[]): Model<Api> | undefined {
+	const trimmedReference = modelReference.trim();
+	if (!trimmedReference) {
+		return undefined;
+	}
+
+	const normalizedReference = trimmedReference.toLowerCase();
+
+	const canonicalMatches = availableModels.filter(
+		(model) => formatModelReference(model).toLowerCase() === normalizedReference,
+	);
+	if (canonicalMatches.length === 1) {
+		return canonicalMatches[0];
+	}
+
+	if (canonicalMatches.length > 1) {
+		return undefined;
+	}
+
+	const slashIndex = trimmedReference.indexOf("/");
+	if (slashIndex !== -1) {
+		const provider = trimmedReference.substring(0, slashIndex).trim();
+		const modelId = trimmedReference.substring(slashIndex + 1).trim();
+		if (provider && modelId) {
+			const providerMatches = availableModels.filter(
+				(model) =>
+					model.provider.toLowerCase() === provider.toLowerCase() &&
+					model.id.toLowerCase() === modelId.toLowerCase(),
+			);
+			if (providerMatches.length === 1) {
+				return providerMatches[0];
+			}
+			if (providerMatches.length > 1) {
+				return undefined;
+			}
+		}
+	}
+
+	const idMatches = availableModels.filter((model) => model.id.toLowerCase() === normalizedReference);
+	return idMatches.length === 1 ? idMatches[0] : undefined;
+}
+
+function parsePositiveInt(value: string): number | undefined {
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isFinite(parsed) || parsed < 1) {
+		return undefined;
+	}
+	return parsed;
 }
 
 function getMemory(channelDir: string): string {
@@ -440,7 +484,16 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			tools,
 		},
 		convertToLlm,
-		getApiKey: async () => getAnthropicApiKey(authStorage),
+		getApiKey: async (provider: string) => {
+			const key = await modelRegistry.getApiKeyForProvider(provider);
+			if (!key) {
+				throw new Error(
+					`No API key found for ${provider}.\n\n` +
+						`Set an API key environment variable, or use /login and link auth.json from ${join(homedir(), ".pi", "mom", "auth.json")}`,
+				);
+			}
+			return key;
+		},
 	});
 
 	// Load existing messages
@@ -474,6 +527,333 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		resourceLoader,
 		baseToolsOverride,
 	});
+
+	const getModelCandidates = (): Model<Api>[] => {
+		if (session.scopedModels.length > 0) {
+			return session.scopedModels.map((scoped) => scoped.model);
+		}
+		session.modelRegistry.refresh();
+		return session.modelRegistry.getAvailable();
+	};
+
+	const getOAuthCredentialIndices = (providerId: string): number[] => {
+		const credentials = session.modelRegistry.authStorage.getCredentials(providerId);
+		return credentials
+			.map((credential, index) => ({ credential, index }))
+			.filter((entry) => entry.credential.type === "oauth")
+			.map((entry) => entry.index);
+	};
+
+	const formatOAuthAccountOption = (providerId: string, oauthIndex: number): string => {
+		const authStorage = session.modelRegistry.authStorage;
+		const oauthCredentialIndices = getOAuthCredentialIndices(providerId);
+		const credentialIndex = oauthCredentialIndices[oauthIndex];
+		const credentials = authStorage.getCredentials(providerId);
+		const credential = credentialIndex !== undefined ? credentials[credentialIndex] : undefined;
+		const accountId =
+			credential?.type === "oauth" && typeof credential.accountId === "string"
+				? credential.accountId.slice(0, 8)
+				: undefined;
+		const active =
+			credentialIndex !== undefined && authStorage.getActiveIndex(providerId) === credentialIndex ? " (active)" : "";
+		const suffix = accountId ? ` • ${accountId}` : "";
+		return `Account ${oauthIndex + 1}${suffix}${active}`;
+	};
+
+	const describeProviderAccounts = (providerId: string): string => {
+		const oauthCredentialIndices = getOAuthCredentialIndices(providerId);
+		if (oauthCredentialIndices.length === 0) {
+			return `No OAuth accounts configured for ${providerId}.`;
+		}
+		const lines = oauthCredentialIndices.map((_credentialIndex, oauthIndex) =>
+			formatOAuthAccountOption(providerId, oauthIndex),
+		);
+		return lines.join("\n");
+	};
+
+	const setOAuthAccount = (providerId: string, accountNumber: number): { ok: boolean; message: string } => {
+		const authStorage = session.modelRegistry.authStorage;
+		const oauthCredentialIndices = getOAuthCredentialIndices(providerId);
+		if (oauthCredentialIndices.length === 0) {
+			return { ok: false, message: `No OAuth accounts configured for ${providerId}.` };
+		}
+
+		if (accountNumber < 1 || accountNumber > oauthCredentialIndices.length) {
+			return {
+				ok: false,
+				message: `Invalid account number ${accountNumber}. Available accounts: 1-${oauthCredentialIndices.length}.`,
+			};
+		}
+
+		const credentialIndex = oauthCredentialIndices[accountNumber - 1];
+		const changed = authStorage.setActiveCredentialIndex(providerId, credentialIndex);
+		if (!changed) {
+			return { ok: false, message: `Failed to switch account for ${providerId}.` };
+		}
+
+		return {
+			ok: true,
+			message: `Using ${formatOAuthAccountOption(providerId, accountNumber - 1)} for ${providerId}.`,
+		};
+	};
+
+	const handleThinkingCommand = async (text: string, ctx: SlackContext): Promise<boolean> => {
+		if (!(text === "/thinking" || text.startsWith("/thinking "))) {
+			return false;
+		}
+
+		const args = text.replace(/^\/thinking/, "").trim();
+		const availableLevels = session.getAvailableThinkingLevels();
+		if (!args) {
+			await ctx.respond(`Thinking level: ${session.thinkingLevel} (available: ${availableLevels.join(", ")})`);
+			return true;
+		}
+
+		const [rawLevel, ...extraArgs] = args.split(/\s+/).filter(Boolean);
+		if (!rawLevel || extraArgs.length > 0) {
+			await ctx.respond("Usage: /thinking <off|minimal|low|medium|high|xhigh>");
+			return true;
+		}
+
+		const normalizedLevel = rawLevel.toLowerCase();
+		if (!THINKING_LEVEL_ORDER.includes(normalizedLevel as ThinkingLevel)) {
+			await ctx.respond("Invalid thinking level. Use: off, minimal, low, medium, high, xhigh");
+			return true;
+		}
+
+		const requestedLevel = normalizedLevel as ThinkingLevel;
+		session.setThinkingLevel(requestedLevel);
+		const effectiveLevel = session.thinkingLevel;
+
+		if (effectiveLevel === requestedLevel) {
+			await ctx.respond(`Thinking level: ${effectiveLevel}`);
+			return true;
+		}
+
+		if (!session.supportsThinking()) {
+			await ctx.respond("Current model does not support thinking; using off");
+			return true;
+		}
+
+		await ctx.respond(
+			`Thinking level: ${effectiveLevel} (requested ${requestedLevel} is unavailable for this model)`,
+		);
+		return true;
+	};
+
+	const handleModelCommand = async (text: string, ctx: SlackContext): Promise<boolean> => {
+		if (!(text === "/model" || text.startsWith("/model "))) {
+			return false;
+		}
+
+		const args = text.replace(/^\/model/, "").trim();
+		const currentModel = session.model ?? model;
+		if (!args) {
+			const availableModels = getModelCandidates();
+			const providers = new Set(availableModels.map((candidate) => candidate.provider));
+			const accountInfo = describeProviderAccounts(currentModel.provider);
+			await ctx.respond(
+				[
+					`Model: ${formatModelReference(currentModel)}`,
+					`Thinking: ${session.thinkingLevel}`,
+					`Available: ${availableModels.length} model(s) across ${providers.size} provider(s)`,
+					"",
+					"Usage:",
+					"/model list",
+					"/model <provider/model>",
+					"/model <provider/model> --account <n>",
+					"/model account [provider] [n]",
+					"",
+					`Accounts (${currentModel.provider}):`,
+					accountInfo,
+				].join("\n"),
+			);
+			return true;
+		}
+
+		if (args.toLowerCase() === "list") {
+			const availableModels = getModelCandidates();
+			if (availableModels.length === 0) {
+				await ctx.respond("No models available.");
+				return true;
+			}
+
+			const sortedModels = [...availableModels].sort((a, b) => {
+				if (a.provider !== b.provider) {
+					return a.provider.localeCompare(b.provider);
+				}
+				return a.id.localeCompare(b.id);
+			});
+			const maxModels = 200;
+			const shownModels = sortedModels.slice(0, maxModels);
+			const providerCount = new Set(sortedModels.map((candidate) => candidate.provider)).size;
+			const lines = shownModels.map((candidate) => {
+				const isCurrent =
+					candidate.provider === currentModel.provider && candidate.id === currentModel.id ? " (current)" : "";
+				return `${formatModelReference(candidate)}${isCurrent}`;
+			});
+			if (sortedModels.length > shownModels.length) {
+				lines.push(`... (${sortedModels.length - shownModels.length} more model(s))`);
+			}
+
+			await ctx.respond(
+				[`Available models: ${sortedModels.length} across ${providerCount} provider(s)`, ...lines].join("\n"),
+			);
+			return true;
+		}
+
+		const tokens = args.split(/\s+/).filter(Boolean);
+		if (tokens.length > 0 && tokens[0]?.toLowerCase() === "account") {
+			const accountArgs = tokens.slice(1);
+			let providerId = currentModel.provider;
+			let accountNumber: number | undefined;
+
+			if (accountArgs.length === 1) {
+				const maybeNumber = parsePositiveInt(accountArgs[0]);
+				if (maybeNumber !== undefined) {
+					accountNumber = maybeNumber;
+				} else {
+					providerId = accountArgs[0];
+				}
+			} else if (accountArgs.length === 2) {
+				providerId = accountArgs[0];
+				accountNumber = parsePositiveInt(accountArgs[1]);
+				if (accountNumber === undefined) {
+					await ctx.respond("Usage: /model account [provider] [account-number]");
+					return true;
+				}
+			} else if (accountArgs.length > 2) {
+				await ctx.respond("Usage: /model account [provider] [account-number]");
+				return true;
+			}
+
+			if (accountNumber === undefined) {
+				await ctx.respond(`Accounts (${providerId}):\n${describeProviderAccounts(providerId)}`);
+				return true;
+			}
+
+			const result = setOAuthAccount(providerId, accountNumber);
+			await ctx.respond(result.message);
+			return true;
+		}
+
+		let accountNumber: number | undefined;
+		const modelTokens: string[] = [];
+		for (let i = 0; i < tokens.length; i++) {
+			const token = tokens[i];
+			const lower = token.toLowerCase();
+			if (lower === "account" || lower === "--account") {
+				const value = tokens[i + 1];
+				if (!value) {
+					await ctx.respond("Usage: /model <provider/model> --account <n>");
+					return true;
+				}
+				const parsed = parsePositiveInt(value);
+				if (parsed === undefined) {
+					await ctx.respond("Account number must be a positive integer.");
+					return true;
+				}
+				accountNumber = parsed;
+				i++;
+				continue;
+			}
+
+			if (lower.startsWith("--account=")) {
+				const value = token.substring("--account=".length);
+				const parsed = parsePositiveInt(value);
+				if (parsed === undefined) {
+					await ctx.respond("Account number must be a positive integer.");
+					return true;
+				}
+				accountNumber = parsed;
+				continue;
+			}
+
+			modelTokens.push(token);
+		}
+
+		if (accountNumber === undefined && modelTokens.length > 1) {
+			const trailingNumber = parsePositiveInt(modelTokens[modelTokens.length - 1]);
+			if (trailingNumber !== undefined) {
+				accountNumber = trailingNumber;
+				modelTokens.pop();
+			}
+		}
+
+		const modelReference = modelTokens.join(" ").trim();
+		if (!modelReference) {
+			await ctx.respond("Usage: /model <provider/model> [--account <n>]");
+			return true;
+		}
+
+		const availableModels = getModelCandidates();
+		let selectedModel = findExactModelReferenceMatch(modelReference, availableModels);
+		if (!selectedModel) {
+			const query = modelReference.toLowerCase();
+			const partialMatches = availableModels.filter((candidate) => {
+				const canonical = formatModelReference(candidate).toLowerCase();
+				const candidateName = candidate.name?.toLowerCase() ?? "";
+				return (
+					canonical.includes(query) || candidate.id.toLowerCase().includes(query) || candidateName.includes(query)
+				);
+			});
+			if (partialMatches.length === 1) {
+				selectedModel = partialMatches[0];
+			} else if (partialMatches.length > 1) {
+				const options = partialMatches.slice(0, 12).map((candidate) => formatModelReference(candidate));
+				const suffix = partialMatches.length > options.length ? "\n..." : "";
+				await ctx.respond(`Model is ambiguous. Be more specific:\n${options.join("\n")}${suffix}`);
+				return true;
+			} else {
+				await ctx.respond(`No model found for "${modelReference}".`);
+				return true;
+			}
+		}
+
+		try {
+			await session.setModel(selectedModel);
+		} catch (error) {
+			await ctx.respond(error instanceof Error ? error.message : String(error));
+			return true;
+		}
+
+		if (accountNumber !== undefined) {
+			const accountResult = setOAuthAccount(selectedModel.provider, accountNumber);
+			if (!accountResult.ok) {
+				await ctx.respond(`Model: ${formatModelReference(selectedModel)}\n${accountResult.message}`);
+				return true;
+			}
+			await ctx.respond(`Model: ${formatModelReference(selectedModel)}\n${accountResult.message}`);
+			return true;
+		}
+
+		const oauthCredentialCount = getOAuthCredentialIndices(selectedModel.provider).length;
+		if (oauthCredentialCount > 1) {
+			await ctx.respond(
+				`Model: ${formatModelReference(selectedModel)}\n` +
+					`Accounts (${selectedModel.provider}):\n${describeProviderAccounts(selectedModel.provider)}\n` +
+					"Use /model account <n> to switch accounts.",
+			);
+			return true;
+		}
+
+		await ctx.respond(`Model: ${formatModelReference(selectedModel)}`);
+		return true;
+	};
+
+	const handleSlashCommand = async (text: string, ctx: SlackContext): Promise<boolean> => {
+		const trimmed = text.trim();
+		if (!trimmed.startsWith("/")) {
+			return false;
+		}
+		if (await handleThinkingCommand(trimmed, ctx)) {
+			return true;
+		}
+		if (await handleModelCommand(trimmed, ctx)) {
+			return true;
+		}
+		return false;
+	};
 
 	// Mutable per-run state - event handler references this
 	const runState = {
@@ -679,6 +1059,11 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				const hostPath = translateToHostPath(filePath, channelDir, workspacePath, channelId);
 				await ctx.uploadFile(hostPath, title);
 			});
+
+			// Handle slash commands without invoking the model
+			if (await handleSlashCommand(ctx.message.text, ctx)) {
+				return { stopReason: "stop", errorMessage: undefined };
+			}
 
 			// Reset per-run state
 			runState.ctx = ctx;

@@ -17,7 +17,7 @@ A Slack bot powered by an LLM that can execute bash commands, read/write files, 
 
 - [Artifacts Server](docs/artifacts-server.md) - Share HTML/JS visualizations publicly with live reload
 - [Events System](docs/events.md) - Schedule reminders and periodic tasks
-- [Sandbox Guide](docs/sandbox.md) - Docker vs host mode security
+- [Sandbox Guide](docs/sandbox.md) - Docker sandbox security
 - [Slack Bot Setup](docs/slack-bot-minimal-guide.md) - Minimal Slack integration guide
 
 ## Installation
@@ -82,12 +82,10 @@ mom --sandbox=docker:mom-sandbox ./data
 ## CLI Options
 
 ```bash
-mom [options] <working-directory>
-
-Options:
-  --sandbox=host              Run tools on host (not recommended)
-  --sandbox=docker:<name>     Run tools in Docker container (recommended)
+mom --sandbox=docker:<name> <working-directory>
 ```
+
+A Docker sandbox is required. Host mode is disabled.
 
 ## Environment Variables
 
@@ -136,6 +134,24 @@ Mom is a Node.js app that runs on your host machine. She connects to Slack via S
 4. Any files or tools mom creates are stored in the channel's directory
 5. Mom's direct reply is stored in `log.jsonl`, while details like tool call results are kept in `context.jsonl` which she'll see and thus "remember" on subsequent requests
 
+### Slack Command Conventions
+
+Mom supports slash-style control commands in chat:
+
+- `/thinking`
+- `/thinking <off|minimal|low|medium|high|xhigh>`
+- `/model`
+- `/model list`
+- `/model <provider/model>`
+- `/model <provider/model> --account <n>`
+- `/model account [provider] [n]`
+
+How to invoke:
+- In channels, address mom and include the command (example: `@mom /model anthropic/claude-sonnet-4-5`).
+- In DMs, send the command directly.
+
+`stop` remains a plain text command (not slash-prefixed) to cancel an active run.
+
 **Context Management:**
 - Mom has limited context depending on the LLM model used. E.g. Claude Opus or Sonnet 4.5 can process a maximum of 200k tokens
 - When the context exceeds the LLM's context window size, mom compacts the context: keeps recent messages and tool results in full, summarizes older ones
@@ -154,22 +170,16 @@ Mom has access to these tools:
 
 ### Bash Execution Environment
 
-Mom uses the `bash` tool to do most of her work. It can run in one of two environments:
+Mom uses the `bash` tool to do most of her work inside a Docker sandbox:
 
-**Docker environment (recommended)**:
 - Commands execute inside an isolated Linux container
 - Mom can only access the mounted data directory from your host, plus anything inside the container
 - She installs tools inside the container and knows apk, apt, yum, etc.
 - Your host system is protected
 
-**Host environment**:
-- Commands execute directly on your machine
-- Mom has full access to your system
-- Not recommended. See security section below
-
 ### Self-Managing Environment
 
-Inside her execution environment (Docker container or host), mom has full control:
+Inside her Docker execution environment, mom has full control:
 - **Installs tools**: `apk add git jq curl` (Linux) or `brew install` (macOS)
 - **Configures tool credentials**: Asks you for tokens/keys and stores them inside the container or data directory, depending on the tool's needs
 - **Persistent**: Everything she installs stays between sessions. If you remove the container, anything not in the data directory is lost
@@ -407,7 +417,7 @@ Mom executes the hidden command and sends your SSH key to the attacker.
 - API keys (GitHub, Groq, Gmail app passwords, etc.)
 - Tokens stored by installed tools (gh CLI, git credentials)
 - Files in the data directory
-- SSH keys (in host mode)
+- Any credentials you configure inside the container
 
 **Mitigations:**
 - Use dedicated bot accounts with minimal permissions. Use read-only tokens when possible
@@ -416,22 +426,13 @@ Mom executes the hidden command and sends your SSH key to the attacker.
 - Monitor activity. Check tool calls and results in threads
 - Audit the data directory regularly. Know what credentials mom has access to
 
-### Docker vs Host Mode
+### Docker Sandbox
 
-**Docker mode** (recommended):
-- Limits mom to the container. She can only access the mounted data directory from your host
+- Mom runs with a Docker sandbox only
+- The container can access the mounted data directory and anything inside the container
 - Credentials are isolated to the container
-- Malicious commands can't damage your host system
-- Still vulnerable to credential exfiltration. Anything inside the container can be accessed
-
-**Host mode** (not recommended):
-- Mom has full access to your machine with your user permissions
-- Can access SSH keys, config files, anything on your system
-- Destructive commands can damage your files: `rm -rf ~/Documents`
-- Only use in disposable VMs or if you fully understand the risks
-
-**Mitigation:**
-- Always use Docker mode unless you're in a disposable environment
+- Malicious commands can't directly damage your host system
+- Credential exfiltration is still possible for anything available inside the container
 
 ### Access Control
 
@@ -469,7 +470,7 @@ mom --sandbox=docker:mom-exec ./data-exec
 - `src/context.ts`: Session manager (context.jsonl), log-to-context sync
 - `src/store.ts`: Channel data persistence, attachment downloads
 - `src/log.ts`: Centralized logging (console output)
-- `src/sandbox.ts`: Docker/host sandbox execution
+- `src/sandbox.ts`: Sandbox execution
 - `src/tools/`: Tool implementations (bash, read, write, edit, attach)
 
 ### Running in Dev Mode

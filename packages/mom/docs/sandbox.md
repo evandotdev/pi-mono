@@ -2,7 +2,7 @@
 
 ## Overview
 
-Mom can run tools either directly on the host or inside a Docker container for isolation.
+Mom runs tools inside a Docker container for isolation.
 
 ## Why Docker?
 
@@ -104,15 +104,10 @@ To start fresh: `./docker.sh remove && ./docker.sh create ./data`
 ## CLI Options
 
 ```bash
-# Run on host (default, no isolation)
-mom ./data
-
-# Run with Docker sandbox
 mom --sandbox=docker:mom-sandbox ./data
-
-# Explicit host mode
-mom --sandbox=host ./data
 ```
+
+A Docker sandbox is required. Host mode is disabled.
 
 ## Security Considerations
 
