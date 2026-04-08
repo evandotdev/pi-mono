@@ -400,13 +400,22 @@ export class InteractiveMode {
 		const modelCommand = slashCommands.find((command) => command.name === "model");
 		if (modelCommand) {
 			modelCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				const commandItems = [{ value: "list", label: "list", description: "List available models in chat" }];
+				const commandMatches = fuzzyFilter(commandItems, prefix, (item) => item.value).map((item) => ({
+					value: item.value,
+					label: item.label,
+					description: item.description,
+				}));
+
 				// Get available models (scoped or from registry)
 				const models =
 					this.session.scopedModels.length > 0
 						? this.session.scopedModels.map((s) => s.model)
 						: this.session.modelRegistry.getAvailable();
 
-				if (models.length === 0) return null;
+				if (models.length === 0) {
+					return commandMatches.length > 0 ? commandMatches : null;
+				}
 
 				// Create items with provider/id format
 				const items = models.map((m) => ({
@@ -417,14 +426,14 @@ export class InteractiveMode {
 
 				// Fuzzy filter by model ID + provider (allows "opus anthropic" to match)
 				const filtered = fuzzyFilter(items, prefix, (item) => `${item.id} ${item.provider}`);
-
-				if (filtered.length === 0) return null;
-
-				return filtered.map((item) => ({
+				const modelMatches = filtered.map((item) => ({
 					value: item.label,
 					label: item.id,
 					description: item.provider,
 				}));
+
+				const completions = [...commandMatches, ...modelMatches];
+				return completions.length > 0 ? completions : null;
 			};
 		}
 
@@ -3672,18 +3681,65 @@ export class InteractiveMode {
 	}
 
 	private async handleModelCommand(searchTerm?: string): Promise<void> {
-		if (!searchTerm) {
+		const trimmedSearchTerm = searchTerm?.trim();
+		if (!trimmedSearchTerm) {
 			this.showModelSelector();
 			return;
 		}
 
-		const model = await this.findExactModelMatch(searchTerm);
+		if (trimmedSearchTerm.toLowerCase() === "list") {
+			await this.showModelList();
+			return;
+		}
+
+		const model = await this.findExactModelMatch(trimmedSearchTerm);
 		if (model) {
 			await this.selectModelAndMaybeAccount(model);
 			return;
 		}
 
-		this.showModelSelector(searchTerm);
+		this.showModelSelector(trimmedSearchTerm);
+	}
+
+	private async showModelList(): Promise<void> {
+		const models = await this.getModelCandidates();
+		if (models.length === 0) {
+			this.showStatus("No models available");
+			return;
+		}
+
+		const currentModel = this.session.model;
+		const sortedModels = [...models].sort((a, b) => {
+			if (a.provider !== b.provider) {
+				return a.provider.localeCompare(b.provider);
+			}
+			return a.id.localeCompare(b.id);
+		});
+
+		const maxRows = 200;
+		const shownModels = sortedModels.slice(0, maxRows);
+		const providerCount = new Set(sortedModels.map((candidate) => candidate.provider)).size;
+		const lines = shownModels.map((candidate) => {
+			const isCurrent =
+				currentModel && candidate.provider === currentModel.provider && candidate.id === currentModel.id
+					? " (current)"
+					: "";
+			return `${candidate.provider}/${candidate.id}${isCurrent}`;
+		});
+		if (sortedModels.length > shownModels.length) {
+			lines.push(`... ${sortedModels.length - shownModels.length} more model(s)`);
+		}
+
+		const output = [
+			theme.bold("Available Models"),
+			`${sortedModels.length} model(s) across ${providerCount} provider(s)`,
+			"",
+			...lines,
+		].join("\n");
+
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(output, 1, 0));
+		this.ui.requestRender();
 	}
 
 	private async findExactModelMatch(searchTerm: string): Promise<Model<any> | undefined> {

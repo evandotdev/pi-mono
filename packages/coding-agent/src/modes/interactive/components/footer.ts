@@ -135,19 +135,31 @@ export class FooterComponent implements Component {
 		const shortSessionId = sessionId.slice(0, 8);
 		pwd = sessionName ? `${pwd} • ${sessionName} (${shortSessionId})` : `${pwd} • ${shortSessionId}`;
 
-		// Build stats line
-		const statsParts = [];
-		if (totalInput) statsParts.push(`in ${formatTokens(totalInput)}`);
-		if (totalOutput) statsParts.push(`out ${formatTokens(totalOutput)}`);
-		if (totalCacheRead || totalCacheWrite) {
-			statsParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
+		// Colorize context percentage based on usage.
+		// Keep this first in the stats line so it remains visible when space is tight.
+		let contextPercentStr: string;
+		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
+		const contextPercentDisplay =
+			contextPercent === "?"
+				? `?/${formatTokens(contextWindow)}${autoIndicator}`
+				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
+		if (contextPercent === "?") {
+			contextPercentStr = contextPercentDisplay;
+		} else if (contextPercentValue > 90) {
+			contextPercentStr = theme.fg("error", contextPercentDisplay);
+		} else if (contextPercentValue > 70) {
+			contextPercentStr = theme.fg("warning", contextPercentDisplay);
+		} else if (contextPercentValue > 50) {
+			contextPercentStr = contextPercentDisplay;
+		} else if (contextPercentValue > 30) {
+			const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
+			contextPercentStr = `${lightYellow}${contextPercentDisplay}\x1b[39m`;
+		} else {
+			contextPercentStr = theme.fg("success", contextPercentDisplay);
 		}
 
-		// Show cost with "(sub)" indicator if using OAuth subscription
-		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
-		if (totalCost || usingSubscription) {
-			statsParts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
-		}
+		// Build stats line
+		const statsParts = [contextPercentStr];
 
 		// Show usage for the current model's OAuth provider only (e.g. Anthropic).
 		// Render all known windows, sorted by soonest reset, in the form: 23%/5h 61%/7d  reset 3h11m
@@ -189,28 +201,17 @@ export class FooterComponent implements Component {
 			}
 		}
 
-		// Colorize context percentage based on usage
-		let contextPercentStr: string;
-		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
-		const contextPercentDisplay =
-			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
-		if (contextPercent === "?") {
-			contextPercentStr = contextPercentDisplay;
-		} else if (contextPercentValue > 90) {
-			contextPercentStr = theme.fg("error", contextPercentDisplay);
-		} else if (contextPercentValue > 70) {
-			contextPercentStr = theme.fg("warning", contextPercentDisplay);
-		} else if (contextPercentValue > 50) {
-			contextPercentStr = contextPercentDisplay;
-		} else if (contextPercentValue > 30) {
-			const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
-			contextPercentStr = `${lightYellow}${contextPercentDisplay}\x1b[39m`;
-		} else {
-			contextPercentStr = theme.fg("success", contextPercentDisplay);
+		if (totalInput) statsParts.push(`in ${formatTokens(totalInput)}`);
+		if (totalOutput) statsParts.push(`out ${formatTokens(totalOutput)}`);
+		if (totalCacheRead || totalCacheWrite) {
+			statsParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
 		}
-		statsParts.push(contextPercentStr);
+
+		// Show cost with "(sub)" indicator if using OAuth subscription
+		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
+		if (totalCost || usingSubscription) {
+			statsParts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
+		}
 
 		let statsLeft = statsParts.join(" ");
 

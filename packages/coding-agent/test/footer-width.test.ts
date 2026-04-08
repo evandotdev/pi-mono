@@ -60,6 +60,10 @@ function createSession(options: {
 	return session as unknown as AgentSession;
 }
 
+function stripAnsi(text: string): string {
+	return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
 	const provider = {
 		getGitBranch: () => "main",
@@ -117,5 +121,26 @@ describe("FooterComponent width handling", () => {
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
+	});
+
+	it("keeps context usage counter visible when stats are truncated", () => {
+		const width = 44;
+		const session = createSession({
+			sessionName: "",
+			modelId: "very-long-model-name-for-truncation",
+			provider: "test",
+			usage: {
+				input: 987_654,
+				output: 654_321,
+				cacheRead: 123_456,
+				cacheWrite: 78_901,
+				cost: { total: 12.345 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(width);
+		expect(visibleWidth(lines[1])).toBeLessThanOrEqual(width);
+		expect(stripAnsi(lines[1])).toContain("12.3%/200k (auto)");
 	});
 });
