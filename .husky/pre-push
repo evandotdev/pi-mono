@@ -1,6 +1,10 @@
 #!/bin/sh
 
 echo "Running checks before push..."
-npm run check || exit 1
+npm run check 
+if [ $? -ne 0 ]; then
+  echo "❌ Checks failed. Please fix the errors before committing."
+  exit 1
+fi
 
-echo "All pre-push checks passed!"
+echo "✅ All pre-push checks passed!"
