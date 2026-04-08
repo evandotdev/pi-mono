@@ -418,42 +418,69 @@ class SessionList implements Component, Focusable {
 		);
 		const endIndex = Math.min(startIndex + this.maxVisible, this.filteredSessions.length);
 
-		// Render visible sessions (one line each with tree structure)
+		// First pass: pre-compute metadata for visible sessions and find the
+		// maximum width of (treePrefix + leftMeta) so session names align.
+		interface RowData {
+			node: FlatSessionNode;
+			prefix: string;
+			normalizedMessage: string;
+			hasName: boolean;
+			leftMetaText: string;
+			rightPart: string;
+			prefixWidth: number;
+			metaWidth: number;
+		}
+
+		const rows: RowData[] = [];
+		let maxPrefixMetaWidth = 0;
+
 		for (let i = startIndex; i < endIndex; i++) {
 			const node = this.filteredSessions[i]!;
 			const session = node.session;
-			const isSelected = i === this.selectedIndex;
-			const isConfirmingDelete = session.path === this.confirmingDeletePath;
-			const isCurrent = this.currentSessionFilePath === session.path;
 
-			// Build tree prefix
 			const prefix = this.buildTreePrefix(node);
-
-			// Session display text (name or first message)
 			const hasName = !!session.name;
 			const displayText = session.name ?? session.firstMessage;
 			const normalizedMessage = displayText.replace(/[\x00-\x1f\x7f]/g, " ").trim();
 
-			// Right side: message count and age
 			const age = formatSessionDate(session.modified);
 			const msgCount = String(session.messageCount);
-			let rightPart = `${msgCount} ${age}`;
+			const leftMetaParts = [`${age} ${msgCount}`];
 			if (this.showCwd && session.cwd) {
-				rightPart = `${shortenPath(session.cwd)} ${rightPart}`;
+				leftMetaParts.push(shortenPath(session.cwd));
 			}
-			if (this.showPath) {
-				rightPart = `${shortenPath(session.path)} ${rightPart}`;
-			}
+			const leftMetaText = leftMetaParts.join(" ");
+			const rightPart = this.showPath ? shortenPath(session.path) : "";
 
-			// Cursor
+			const prefixWidth = visibleWidth(prefix);
+			// +1 for the trailing space after meta
+			const metaWidth = leftMetaText.length + 1;
+
+			const total = prefixWidth + metaWidth;
+			if (total > maxPrefixMetaWidth) maxPrefixMetaWidth = total;
+
+			rows.push({ node, prefix, normalizedMessage, hasName, leftMetaText, rightPart, prefixWidth, metaWidth });
+		}
+
+		// Second pass: render each row, padding metadata so names start at the same column.
+		for (let ri = 0; ri < rows.length; ri++) {
+			const row = rows[ri]!;
+			const i = startIndex + ri;
+			const session = row.node.session;
+			const isSelected = i === this.selectedIndex;
+			const isConfirmingDelete = session.path === this.confirmingDeletePath;
+			const isCurrent = this.currentSessionFilePath === session.path;
+
+			// Pad metadata so (prefix + paddedMeta) width == maxPrefixMetaWidth
+			const padNeeded = maxPrefixMetaWidth - row.prefixWidth - row.metaWidth;
+			const paddedMeta = `${row.leftMetaText}${" ".repeat(padNeeded + 1)}`;
+
 			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
 
-			// Calculate available width for message
-			const prefixWidth = visibleWidth(prefix);
-			const rightWidth = visibleWidth(rightPart) + 2; // +2 for spacing
-			const availableForMsg = width - 2 - prefixWidth - rightWidth; // -2 for cursor
+			const rightWidth = row.rightPart ? visibleWidth(row.rightPart) + 2 : 0;
+			const availableForMsg = width - 2 - maxPrefixMetaWidth - rightWidth; // -2 for cursor
 
-			const truncatedMsg = truncateToWidth(normalizedMessage, Math.max(10, availableForMsg), "…");
+			const truncatedMsg = truncateToWidth(row.normalizedMessage, Math.max(0, availableForMsg), "…");
 
 			// Style message
 			let messageColor: "error" | "warning" | "accent" | null = null;
@@ -461,19 +488,24 @@ class SessionList implements Component, Focusable {
 				messageColor = "error";
 			} else if (isCurrent) {
 				messageColor = "accent";
-			} else if (hasName) {
+			} else if (row.hasName) {
 				messageColor = "warning";
 			}
-			let styledMsg = messageColor ? theme.fg(messageColor, truncatedMsg) : truncatedMsg;
-			if (isSelected) {
+			let styledMsg = truncatedMsg;
+			if (styledMsg && messageColor) {
+				styledMsg = theme.fg(messageColor, styledMsg);
+			}
+			if (styledMsg && isSelected) {
 				styledMsg = theme.bold(styledMsg);
 			}
 
-			// Build line
-			const leftPart = cursor + theme.fg("dim", prefix) + styledMsg;
+			const styledMeta = theme.fg("dim", paddedMeta);
+			const leftPart = cursor + theme.fg("dim", row.prefix) + styledMeta + styledMsg;
 			const leftWidth = visibleWidth(leftPart);
-			const spacing = Math.max(1, width - leftWidth - visibleWidth(rightPart));
-			const styledRight = theme.fg(isConfirmingDelete ? "error" : "dim", rightPart);
+			const spacing = row.rightPart
+				? Math.max(1, width - leftWidth - visibleWidth(row.rightPart))
+				: Math.max(0, width - leftWidth);
+			const styledRight = row.rightPart ? theme.fg(isConfirmingDelete ? "error" : "dim", row.rightPart) : "";
 
 			let line = leftPart + " ".repeat(spacing) + styledRight;
 			if (isSelected) {

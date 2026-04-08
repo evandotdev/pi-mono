@@ -36,6 +36,7 @@ import {
 	collectEntriesForBranchSummary,
 	compact,
 	estimateContextTokens,
+	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
 	shouldCompact,
@@ -211,6 +212,33 @@ export interface SessionStats {
 	contextUsage?: ContextUsage;
 }
 
+export interface ContextSourceContribution {
+	id:
+		| "systemPromptBase"
+		| "systemPromptExtensionDelta"
+		| "conversationMessages"
+		| "summaryMessages"
+		| "extensionMessages"
+		| "pendingNextTurnExtensionMessages";
+	label: string;
+	tokens: number;
+	messageCount?: number;
+}
+
+export interface ContextSourceBreakdown {
+	contextWindow: number;
+	estimatedTokens: number;
+	estimatedPercent: number | null;
+	measuredTokens: number | null;
+	measuredPercent: number | null;
+	contributions: ContextSourceContribution[];
+	extensionMessageTypes: Array<{
+		customType: string;
+		tokens: number;
+		messageCount: number;
+	}>;
+}
+
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
@@ -225,6 +253,11 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 
 /** Thinking levels including xhigh (for supported models) */
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
+function estimateTextTokens(text: string): number {
+	if (text.length === 0) return 0;
+	return Math.ceil(text.length / 4);
+}
 
 // ============================================================================
 // AgentSession Class
@@ -2655,6 +2688,41 @@ export class AgentSession {
 		this.sessionManager.appendSessionInfo(name);
 	}
 
+	/**
+	 * Clear the active branch context while keeping the current session file.
+	 *
+	 * This resets the branch leaf to root and appends a non-context custom entry as
+	 * a durable branch marker, so the cleared state survives reloads. Full history
+	 * remains available through /tree.
+	 */
+	async clearContext(): Promise<void> {
+		this._disconnectFromAgent();
+		try {
+			this.abortCompaction();
+			this.abortBranchSummary();
+			await this.abort();
+
+			this._pendingBashMessages = [];
+			this._pendingNextTurnMessages = [];
+			this.clearQueue();
+			this._overflowRecoveryAttempted = false;
+			this._lastAssistantMessage = undefined;
+
+			const previousLeafId = this.sessionManager.getLeafId();
+			this.sessionManager.resetLeaf();
+			this.sessionManager.appendCustomEntry("pi:context_clear", {
+				previousLeafId,
+				timestamp: new Date().toISOString(),
+			});
+
+			const sessionContext = this.sessionManager.buildSessionContext();
+			this.agent.state.messages = sessionContext.messages;
+			this.agent.state.systemPrompt = this._baseSystemPrompt;
+		} finally {
+			this._reconnectToAgent();
+		}
+	}
+
 	// =========================================================================
 	// Tree Navigation
 	// =========================================================================
@@ -2966,12 +3034,132 @@ export class AgentSession {
 		}
 
 		const estimate = estimateContextTokens(this.messages);
-		const percent = (estimate.tokens / contextWindow) * 100;
+		const systemPromptTokens = estimate.lastUsageIndex === null ? estimateTextTokens(this.systemPrompt) : 0;
+		const tokens = estimate.tokens + systemPromptTokens;
+		const percent = (tokens / contextWindow) * 100;
 
 		return {
-			tokens: estimate.tokens,
+			tokens,
 			contextWindow,
 			percent,
+		};
+	}
+
+	getContextSourceBreakdown(): ContextSourceBreakdown | undefined {
+		const model = this.model;
+		if (!model) return undefined;
+
+		const contextWindow = model.contextWindow ?? 0;
+		if (contextWindow <= 0) return undefined;
+
+		const context = this.sessionManager.buildSessionContext();
+		let conversationTokens = 0;
+		let conversationCount = 0;
+		let summaryTokens = 0;
+		let summaryCount = 0;
+		let extensionTokens = 0;
+		let extensionCount = 0;
+
+		const extensionMessageTypes = new Map<string, { tokens: number; messageCount: number }>();
+		const addExtensionType = (customType: string, tokens: number) => {
+			const existing = extensionMessageTypes.get(customType) ?? { tokens: 0, messageCount: 0 };
+			existing.tokens += tokens;
+			existing.messageCount += 1;
+			extensionMessageTypes.set(customType, existing);
+		};
+
+		for (const message of context.messages) {
+			const tokens = estimateTokens(message);
+			if (message.role === "custom") {
+				extensionTokens += tokens;
+				extensionCount += 1;
+				addExtensionType(message.customType, tokens);
+			} else if (message.role === "compactionSummary" || message.role === "branchSummary") {
+				summaryTokens += tokens;
+				summaryCount += 1;
+			} else {
+				conversationTokens += tokens;
+				conversationCount += 1;
+			}
+		}
+
+		let pendingExtensionTokens = 0;
+		let pendingExtensionCount = 0;
+		for (const pending of this._pendingNextTurnMessages) {
+			const tokens = estimateTokens(pending);
+			pendingExtensionTokens += tokens;
+			pendingExtensionCount += 1;
+			addExtensionType(pending.customType, tokens);
+		}
+
+		const baseSystemPromptTokens = estimateTextTokens(this._baseSystemPrompt);
+		const effectiveSystemPromptTokens = estimateTextTokens(this.systemPrompt);
+		const extensionPromptDelta = effectiveSystemPromptTokens - baseSystemPromptTokens;
+
+		const contributions: ContextSourceContribution[] = [
+			{
+				id: "systemPromptBase",
+				label: "System prompt (base)",
+				tokens: baseSystemPromptTokens,
+			},
+		];
+		if (extensionPromptDelta !== 0) {
+			contributions.push({
+				id: "systemPromptExtensionDelta",
+				label: "System prompt (extension delta)",
+				tokens: extensionPromptDelta,
+			});
+		}
+		if (conversationCount > 0) {
+			contributions.push({
+				id: "conversationMessages",
+				label: "Conversation messages",
+				tokens: conversationTokens,
+				messageCount: conversationCount,
+			});
+		}
+		if (summaryCount > 0) {
+			contributions.push({
+				id: "summaryMessages",
+				label: "Summaries (compaction/branch)",
+				tokens: summaryTokens,
+				messageCount: summaryCount,
+			});
+		}
+		if (extensionCount > 0) {
+			contributions.push({
+				id: "extensionMessages",
+				label: "Extension messages",
+				tokens: extensionTokens,
+				messageCount: extensionCount,
+			});
+		}
+		if (pendingExtensionCount > 0) {
+			contributions.push({
+				id: "pendingNextTurnExtensionMessages",
+				label: "Pending next-turn extension messages",
+				tokens: pendingExtensionTokens,
+				messageCount: pendingExtensionCount,
+			});
+		}
+
+		const estimatedTokens = contributions.reduce((sum, contribution) => sum + contribution.tokens, 0);
+		const usage = this.getContextUsage();
+
+		return {
+			contextWindow,
+			estimatedTokens,
+			estimatedPercent: contextWindow > 0 ? (estimatedTokens / contextWindow) * 100 : null,
+			measuredTokens: usage?.tokens ?? null,
+			measuredPercent: usage?.percent ?? null,
+			contributions,
+			extensionMessageTypes: Array.from(extensionMessageTypes.entries())
+				.map(([customType, value]) => ({
+					customType,
+					tokens: value.tokens,
+					messageCount: value.messageCount,
+				}))
+				.sort((a, b) => b.tokens - a.tokens),
 		};
 	}
 

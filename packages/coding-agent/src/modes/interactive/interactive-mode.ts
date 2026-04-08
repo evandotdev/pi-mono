@@ -7,7 +7,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@mariozechner/pi-ai";
 import type {
 	AutocompleteItem,
@@ -185,6 +185,22 @@ export class InteractiveMode {
 	private readonly defaultWorkingMessage = "Working...";
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
+	private static readonly THINKING_LEVEL_ORDER: ReadonlyArray<ThinkingLevel> = [
+		"off",
+		"minimal",
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+	];
+	private static readonly THINKING_LEVEL_DESCRIPTIONS: Readonly<Record<ThinkingLevel, string>> = {
+		off: "Disable reasoning/thinking",
+		minimal: "Minimal reasoning for fastest responses",
+		low: "Light reasoning",
+		medium: "Balanced reasoning",
+		high: "Stronger reasoning",
+		xhigh: "Maximum reasoning (model-dependent)",
+	};
 
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
@@ -408,6 +424,40 @@ export class InteractiveMode {
 					value: item.label,
 					label: item.id,
 					description: item.provider,
+				}));
+			};
+		}
+
+		const contextCommand = slashCommands.find((command) => command.name === "context");
+		if (contextCommand) {
+			const contextArgs = [
+				{ value: "show", description: "Show context source breakdown" },
+				{ value: "clear", description: "Clear current branch context" },
+			];
+			contextCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				const filtered = fuzzyFilter(contextArgs, prefix, (item) => item.value);
+				if (filtered.length === 0) return null;
+				return filtered.map((item) => ({
+					value: item.value,
+					label: item.value,
+					description: item.description,
+				}));
+			};
+		}
+
+		const thinkingCommand = slashCommands.find((command) => command.name === "thinking");
+		if (thinkingCommand) {
+			thinkingCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+				const availableLevels = this.session.getAvailableThinkingLevels().map((level) => ({
+					value: level,
+					description: InteractiveMode.THINKING_LEVEL_DESCRIPTIONS[level],
+				}));
+				const filtered = fuzzyFilter(availableLevels, prefix, (item) => item.value);
+				if (filtered.length === 0) return null;
+				return filtered.map((item) => ({
+					value: item.value,
+					label: item.value,
+					description: item.description,
 				}));
 			};
 		}
@@ -2176,6 +2226,11 @@ export class InteractiveMode {
 				await this.handleModelCommand(searchTerm);
 				return;
 			}
+			if (text === "/thinking" || text.startsWith("/thinking ")) {
+				this.handleThinkingCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text.startsWith("/export")) {
 				await this.handleExportCommand(text);
 				this.editor.setText("");
@@ -2245,6 +2300,11 @@ export class InteractiveMode {
 				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
 				this.editor.setText("");
 				await this.handleCompactCommand(customInstructions);
+				return;
+			}
+			if (text === "/context" || text.startsWith("/context ")) {
+				this.editor.setText("");
+				await this.handleContextCommand(text);
 				return;
 			}
 			if (text === "/reload") {
@@ -3571,6 +3631,46 @@ export class InteractiveMode {
 		});
 	}
 
+	private handleThinkingCommand(text: string): void {
+		const args = text.replace(/^\/thinking/, "").trim();
+		const availableLevels = this.session.getAvailableThinkingLevels();
+		if (!args) {
+			this.showStatus(`Thinking level: ${this.session.thinkingLevel} (available: ${availableLevels.join(", ")})`);
+			return;
+		}
+
+		const [rawLevel, ...extraArgs] = args.split(/\s+/).filter(Boolean);
+		if (!rawLevel || extraArgs.length > 0) {
+			this.showWarning("Usage: /thinking <off|minimal|low|medium|high|xhigh>");
+			return;
+		}
+
+		const normalizedLevel = rawLevel.toLowerCase();
+		if (!InteractiveMode.THINKING_LEVEL_ORDER.includes(normalizedLevel as ThinkingLevel)) {
+			this.showWarning("Invalid thinking level. Use: off, minimal, low, medium, high, xhigh");
+			return;
+		}
+
+		const requestedLevel = normalizedLevel as ThinkingLevel;
+		this.session.setThinkingLevel(requestedLevel);
+		const effectiveLevel = this.session.thinkingLevel;
+
+		this.footer.invalidate();
+		this.updateEditorBorderColor();
+
+		if (effectiveLevel === requestedLevel) {
+			this.showStatus(`Thinking level: ${effectiveLevel}`);
+			return;
+		}
+
+		if (!this.session.supportsThinking()) {
+			this.showStatus("Current model does not support thinking; using off");
+			return;
+		}
+
+		this.showStatus(`Thinking level: ${effectiveLevel} (requested ${requestedLevel} is unavailable for this model)`);
+	}
+
 	private async handleModelCommand(searchTerm?: string): Promise<void> {
 		if (!searchTerm) {
 			this.showModelSelector();
@@ -4574,6 +4674,90 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(info, 1, 0));
 		this.ui.requestRender();
+	}
+
+	private formatTokenCount(tokens: number): string {
+		return tokens.toLocaleString();
+	}
+
+	private async handleContextCommand(text: string): Promise<void> {
+		const args = text.replace(/^\/context/, "").trim();
+		if (!args || args === "show") {
+			this.showContextBreakdown();
+			return;
+		}
+		if (args === "clear") {
+			await this.handleClearContextCommand();
+			return;
+		}
+
+		this.showWarning("Usage: /context [show|clear]");
+	}
+
+	private showContextBreakdown(): void {
+		const breakdown = this.session.getContextSourceBreakdown();
+		if (!breakdown) {
+			this.showWarning("No active model with context window is selected.");
+			return;
+		}
+
+		const estimatedPercent = breakdown.estimatedPercent === null ? "?" : breakdown.estimatedPercent.toFixed(1);
+		const measuredUsage =
+			breakdown.measuredTokens === null || breakdown.measuredPercent === null
+				? "unknown (waiting for post-compaction assistant usage)"
+				: `${breakdown.measuredPercent.toFixed(1)}% • ${this.formatTokenCount(breakdown.measuredTokens)} / ${this.formatTokenCount(breakdown.contextWindow)}`;
+
+		let info = `${theme.bold("Context Breakdown")}\n\n`;
+		info += `${theme.fg("dim", "Estimated:")} ${estimatedPercent}% • ${this.formatTokenCount(breakdown.estimatedTokens)} / ${this.formatTokenCount(breakdown.contextWindow)}\n`;
+		info += `${theme.fg("dim", "Measured:")} ${measuredUsage}\n\n`;
+		info += `${theme.bold("Sources")}\n`;
+
+		const totalForShare = Math.max(1, Math.abs(breakdown.estimatedTokens));
+		for (const contribution of breakdown.contributions) {
+			const contributionShare = (Math.abs(contribution.tokens) / totalForShare) * 100;
+			const sign = contribution.tokens < 0 ? "-" : "";
+			const messageInfo =
+				contribution.messageCount !== undefined
+					? ` • ${contribution.messageCount} message${contribution.messageCount === 1 ? "" : "s"}`
+					: "";
+			info += `${theme.fg("dim", "- ")}${contribution.label}: ${sign}${this.formatTokenCount(Math.abs(contribution.tokens))} (${contributionShare.toFixed(1)}%)${messageInfo}\n`;
+		}
+
+		if (breakdown.extensionMessageTypes.length > 0) {
+			info += `\n${theme.bold("Extension message types")}\n`;
+			for (const extensionType of breakdown.extensionMessageTypes) {
+				info += `${theme.fg("dim", "- ")}${extensionType.customType}: ${this.formatTokenCount(extensionType.tokens)} • ${extensionType.messageCount} message${extensionType.messageCount === 1 ? "" : "s"}\n`;
+			}
+		}
+
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(info, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private async handleClearContextCommand(): Promise<void> {
+		if (this.session.isCompacting) {
+			this.showWarning("Wait for compaction to finish before clearing context.");
+			return;
+		}
+		if (this.session.isBashRunning) {
+			this.showWarning("Wait for the current bash command to finish before clearing context.");
+			return;
+		}
+
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+		}
+		this.statusContainer.clear();
+
+		try {
+			await this.session.clearContext();
+			this.renderCurrentSessionState();
+			this.showStatus("Cleared current branch context (full history remains in /tree)");
+		} catch (error) {
+			this.showError(`Failed to clear context: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 
 	private handleChangelogCommand(): void {

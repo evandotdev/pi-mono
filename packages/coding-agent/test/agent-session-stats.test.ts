@@ -78,6 +78,20 @@ function syncAgentMessages(session: AgentSession, sessionManager: SessionManager
 }
 
 describe("AgentSession.getSessionStats", () => {
+	it("counts system prompt tokens before first assistant usage", () => {
+		const { session } = createSession();
+
+		try {
+			const usage = session.getContextUsage();
+			const expected = Math.ceil(session.systemPrompt.length / 4);
+			expect(usage?.tokens).toBe(expected);
+			expect(usage?.contextWindow).toBe(model.contextWindow);
+			expect(usage?.percent).toBe((expected / model.contextWindow) * 100);
+		} finally {
+			session.dispose();
+		}
+	});
+
 	it("exposes the current context usage alongside token totals", () => {
 		const { session, sessionManager } = createSession();
 
@@ -136,6 +150,53 @@ describe("AgentSession.getSessionStats", () => {
 			expect(stats.contextUsage).toBeDefined();
 			expect(stats.contextUsage?.tokens).toBe(25_000);
 			expect(stats.contextUsage?.percent).toBe((25_000 / model.contextWindow) * 100);
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("provides source breakdown including extension context messages", () => {
+		const { session, sessionManager } = createSession();
+
+		try {
+			sessionManager.appendMessage(createUserMessage("hello", 1));
+			sessionManager.appendCustomMessageEntry("plan-mode-context", "extension context", true);
+			syncAgentMessages(session, sessionManager);
+
+			const breakdown = session.getContextSourceBreakdown();
+			expect(breakdown).toBeDefined();
+			expect(breakdown?.contributions.some((c) => c.id === "systemPromptBase")).toBe(true);
+			expect(breakdown?.contributions.some((c) => c.id === "conversationMessages")).toBe(true);
+			expect(breakdown?.contributions.some((c) => c.id === "extensionMessages")).toBe(true);
+			const extensionType = breakdown?.extensionMessageTypes.find(
+				(entry) => entry.customType === "plan-mode-context",
+			);
+			expect(extensionType?.messageCount).toBe(1);
+			expect((extensionType?.tokens ?? 0) > 0).toBe(true);
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("clears context in-place while preserving session identity", async () => {
+		const { session, sessionManager } = createSession();
+
+		try {
+			const initialSessionId = session.sessionId;
+			sessionManager.appendMessage(createUserMessage("before", 1));
+			sessionManager.appendMessage(createAssistantMessage("response", 200, 2));
+			syncAgentMessages(session, sessionManager);
+
+			await session.clearContext();
+
+			expect(session.sessionId).toBe(initialSessionId);
+			expect(sessionManager.buildSessionContext().messages).toEqual([]);
+			expect(session.messages).toEqual([]);
+			const leaf = sessionManager.getLeafEntry();
+			expect(leaf?.type).toBe("custom");
+			if (leaf?.type === "custom") {
+				expect(leaf.customType).toBe("pi:context_clear");
+			}
 		} finally {
 			session.dispose();
 		}

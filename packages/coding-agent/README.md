@@ -162,12 +162,14 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 |---------|-------------|
 | `/login`, `/logout` | OAuth authentication |
 | `/model` | Switch models |
+| `/thinking [off\|minimal\|low\|medium\|high\|xhigh]` | Show or set the thinking level |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
 | `/session` | Show session info (path, tokens, cost) |
+| `/context [show\|clear]` | Show context source breakdown or clear current branch context |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/fork` | Create a new session from the current branch |
 | `/compact [prompt]` | Manually compact context, optional custom instructions |

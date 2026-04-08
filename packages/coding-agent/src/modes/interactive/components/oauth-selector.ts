@@ -92,10 +92,27 @@ export class OAuthSelectorComponent extends Container {
 	}
 
 	private formatUsageLabel(usage: ProviderUsage): string {
+		const durationInSeconds = (name: string): number => {
+			const match = name.match(/^(\d+)([mhd])$/);
+			if (!match) return Number.MAX_SAFE_INTEGER;
+			const value = parseInt(match[1], 10);
+			const unit = match[2];
+			switch (unit) {
+				case "m":
+					return value * 60;
+				case "h":
+					return value * 3600;
+				case "d":
+					return value * 86400;
+				default:
+					return Number.MAX_SAFE_INTEGER;
+			}
+		};
+
 		const windows = Object.entries(usage.windows).sort((a, b) => {
-			const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
-			const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
-			if (resetA !== resetB) return resetA - resetB;
+			const durationA = durationInSeconds(a[0]);
+			const durationB = durationInSeconds(b[0]);
+			if (durationA !== durationB) return durationA - durationB;
 			return a[0].localeCompare(b[0]);
 		});
 		return windows
