@@ -10,6 +10,7 @@
 
 - Added `fetchUsage` to `openaiCodexOAuthProvider`, fetching rate-limit utilization from `https://chatgpt.com/api/codex/usage` and exposing primary/secondary windows (e.g. `1h`, `1d`) plus any additional named limits in the status line.
 - Added `fetchUsage` to `anthropicOAuthProvider`, fetching Claude subscription utilization from `https://api.anthropic.com/api/oauth/usage` and exposing `5h` and `7d` windows for consumers such as footer and login UIs.
+- Added `fetchUsage` to `antigravityOAuthProvider`, deriving utilization windows from Cloud Code Assist model quota metadata (`loadCodeAssist` + `fetchAvailableModels`) and exposing grouped windows for Claude, Gemini Flash/Pro, and GPT-OSS.
 
 ### Changed
 
@@ -43,6 +44,7 @@
 
 ### Fixed
 
+- Fixed Anthropic streaming JSON parse failures caused by invalid control characters in SSE chunks by sanitizing stream payloads before parsing ([#2681](https://github.com/badlogic/pi-mono/issues/2681)).
 - Fixed bare `readline` import to use `node:readline` prefix for Deno compatibility ([#2885](https://github.com/badlogic/pi-mono/issues/2885) by [@milosv-vtool](https://github.com/milosv-vtool))
 
 ## [0.65.2] - 2026-04-06

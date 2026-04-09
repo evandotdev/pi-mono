@@ -2,9 +2,26 @@
 
 ## [Unreleased]
 
+### Fork Specific Features
+
+- Interactive OAuth usage dashboard for Anthropic, OpenAI Codex, and Antigravity (footer + account selectors, including utilization windows and reset timing).
+- Multi-account OAuth flow and load balancing, including account selection during model switches and retry-time credential rotation on rate-limit/overload failures.
+- New interactive slash command capabilities: `/thinking`, `/context`, `/model list`, and `/generate-models`.
+
+### Added
+
+- Added OAuth usage visibility in interactive mode: footer and OAuth account selectors now show provider utilization windows and reset timing for Anthropic, OpenAI Codex, and Antigravity accounts.
+- Added multi-account OAuth selection flows in interactive mode, including account selection when switching models and richer account labels in login/model pickers.
+- Added slash commands `/thinking <off|minimal|low|medium|high|xhigh>` and `/context [show|clear]` for direct reasoning-level control and context inspection/clearing.
+- Added `/model list` support to print available models in chat.
+- Added `/generate-models` slash command to run pi-ai model generation from interactive mode.
+- Added `/usage` slash command to show OAuth provider usage across all accounts with utilization windows and reset timing.
+
 ### Changed
 
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
+- Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
+- Changed footer OAuth usage rendering to show all available usage windows (for example `5h` and `7d`) with clearer utilization colorization.
 
 ### Fixed
 
@@ -111,8 +128,6 @@ See [0.67.1]. Version 0.67.0 shipped with a changelog formatting error that caus
 
 - Fixed bare `readline` import to use `node:readline` prefix for Deno compatibility ([#2885](https://github.com/badlogic/pi-mono/issues/2885) by [@milosv-vtool](https://github.com/milosv-vtool))
 - Fixed auto-retry to treat stream failures like `request ended without sending any chunks` as transient errors ([#2892](https://github.com/badlogic/pi-mono/issues/2892))
-- Fixed interactive startup notices to render after the initial resource listing, and added a bundled Earendil startup announcement with inline image rendering for April 8 and 9, 2026. Moved the blog link above the image to avoid overlap with terminal image rendering.
-- Fixed interactive mode to warn when Anthropic subscription auth is active, so users know Anthropic third-party usage draws from extra usage and is billed per token.
 
 ## [0.65.2] - 2026-04-06
 

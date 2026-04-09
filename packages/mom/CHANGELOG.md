@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `/model` slash command with model listing, switching (partial match), and multi-account OAuth selection (`/model account [provider] [n]`).
+- Added `/thinking` slash command for direct reasoning-level control.
+- Added `/usage` slash command to display OAuth provider usage across all accounts.
+
+### Changed
+
+- Disabled host sandbox mode; Docker is now the only supported sandbox type.
+
 ## [0.67.2] - 2026-04-14
 
 ## [0.67.1] - 2026-04-13
