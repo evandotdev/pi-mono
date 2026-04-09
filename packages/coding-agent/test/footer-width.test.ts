@@ -99,11 +99,11 @@ describe("FooterComponent width handling", () => {
 		}
 	});
 
-	it("keeps stats line within width for wide model and provider names", () => {
+	it("renders provider/model/thinking on first line and keeps all lines within width", () => {
 		const width = 60;
 		const session = createSession({
 			sessionName: "",
-			modelId: "模".repeat(30),
+			modelId: "模".repeat(10),
 			provider: "공급자",
 			reasoning: true,
 			thinkingLevel: "high",
@@ -121,6 +121,14 @@ describe("FooterComponent width handling", () => {
 		for (const line of lines) {
 			expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
+
+		const plainFirstLine = stripAnsi(lines[0]);
+		expect(plainFirstLine).toContain("(공급자)");
+		expect(plainFirstLine).toContain("high");
+
+		const plainSecondLine = stripAnsi(lines[1]);
+		expect(plainSecondLine).not.toContain("공급자");
+		expect(plainSecondLine).not.toContain("high");
 	});
 
 	it("keeps context usage counter visible when stats are truncated", () => {

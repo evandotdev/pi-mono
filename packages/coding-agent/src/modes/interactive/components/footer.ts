@@ -135,6 +135,37 @@ export class FooterComponent implements Component {
 		const shortSessionId = sessionId.slice(0, 8);
 		pwd = sessionName ? `${pwd} • ${sessionName} (${shortSessionId})` : `${pwd} • ${shortSessionId}`;
 
+		// Build model info for right side: provider + model + thinking level
+		const modelName = state.model?.id || "no-model";
+		let modelInfoWithoutProvider = modelName;
+		if (state.model?.reasoning) {
+			const thinkingLevel = state.thinkingLevel || "off";
+			modelInfoWithoutProvider =
+				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
+		}
+
+		let modelInfo = modelInfoWithoutProvider;
+		if (state.model) {
+			modelInfo = `(${state.model.provider}) ${modelInfoWithoutProvider}`;
+		}
+
+		// First line: pwd/session on the left, model info on the right.
+		let pwdLeft = pwd;
+		const minPadding = 2;
+		const modelInfoWidth = visibleWidth(modelInfo);
+		if (modelInfoWidth + minPadding <= width) {
+			const availableForLeft = width - minPadding - modelInfoWidth;
+			if (visibleWidth(pwdLeft) > availableForLeft) {
+				pwdLeft = truncateToWidth(pwdLeft, availableForLeft, "...");
+			}
+			const leftWidth = visibleWidth(pwdLeft);
+			const padding = " ".repeat(Math.max(minPadding, width - leftWidth - modelInfoWidth));
+			pwd = `${pwdLeft}${padding}${modelInfo}`;
+		} else {
+			// Very narrow terminal: prioritize showing model info.
+			pwd = truncateToWidth(modelInfo, width, "");
+		}
+
 		// Colorize context percentage based on usage.
 		// Keep this first in the stats line so it remains visible when space is tight.
 		let contextPercentStr: string;
@@ -214,70 +245,15 @@ export class FooterComponent implements Component {
 		}
 
 		let statsLeft = statsParts.join(" ");
-
-		// Add model name on the right side, plus thinking level if model supports it
-		const modelName = state.model?.id || "no-model";
-
-		let statsLeftWidth = visibleWidth(statsLeft);
-
-		// If statsLeft is too wide, truncate it
-		if (statsLeftWidth > width) {
+		if (visibleWidth(statsLeft) > width) {
 			statsLeft = truncateToWidth(statsLeft, width, "...");
-			statsLeftWidth = visibleWidth(statsLeft);
 		}
 
-		// Calculate available space for padding (minimum 2 spaces between stats and model)
-		const minPadding = 2;
-
-		// Add thinking level indicator if model supports reasoning
-		let rightSideWithoutProvider = modelName;
-		if (state.model?.reasoning) {
-			const thinkingLevel = state.thinkingLevel || "off";
-			rightSideWithoutProvider =
-				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
-		}
-
-		// Prepend the provider in parentheses if there are multiple providers and there's enough room
-		let rightSide = rightSideWithoutProvider;
-		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			rightSide = `(${state.model!.provider}) ${rightSideWithoutProvider}`;
-			if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
-				// Too wide, fall back
-				rightSide = rightSideWithoutProvider;
-			}
-		}
-
-		const rightSideWidth = visibleWidth(rightSide);
-		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
-
-		let statsLine: string;
-		if (totalNeeded <= width) {
-			// Both fit - add padding to right-align model
-			const padding = " ".repeat(width - statsLeftWidth - rightSideWidth);
-			statsLine = statsLeft + padding + rightSide;
-		} else {
-			// Need to truncate right side
-			const availableForRight = width - statsLeftWidth - minPadding;
-			if (availableForRight > 0) {
-				const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-				const truncatedRightWidth = visibleWidth(truncatedRight);
-				const padding = " ".repeat(Math.max(0, width - statsLeftWidth - truncatedRightWidth));
-				statsLine = statsLeft + padding + truncatedRight;
-			} else {
-				// Not enough space for right side at all
-				statsLine = statsLeft;
-			}
-		}
-
-		// Apply dim to each part separately. statsLeft may contain color codes (for context %)
-		// that end with a reset, which would clear an outer dim wrapper. So we dim the parts
-		// before and after the colored section independently.
+		// Apply dim to the stats line. statsLeft may include colorized context/usage segments.
 		const dimStatsLeft = theme.fg("dim", statsLeft);
-		const remainder = statsLine.slice(statsLeft.length); // padding + rightSide
-		const dimRemainder = theme.fg("dim", remainder);
 
-		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-		const lines = [pwdLine, dimStatsLeft + dimRemainder];
+		const pwdLine = theme.fg("dim", pwd);
+		const lines = [pwdLine, dimStatsLeft];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();
