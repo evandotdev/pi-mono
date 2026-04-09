@@ -8,9 +8,15 @@
     "zeroAccess": [
       { "pattern": ".env", "description": "environment secrets" },
       { "pattern": ".env.local", "description": "local environment secrets" },
-      { "pattern": ".env.production", "description": "production environment secrets" },
-      { "pattern": ".env.prod", "description": "production environment secrets" },
-      { "pattern": ".dev.vars", "description": "local secret vars" }
+      {
+        "pattern": ".env.production",
+        "description": "production environment secrets"
+      },
+      {
+        "pattern": ".env.prod",
+        "description": "production environment secrets"
+      },
+      { "pattern": ".dev.vars", "description": "dev environment secrets" }
     ],
     "readOnly": [],
     "noDelete": []
@@ -20,17 +26,37 @@
       {
         "pattern": "rm -rf",
         "description": "recursive force delete",
+        "tools": ["bash"],
+        "targets": ["command"],
         "requireConfirmation": false
       },
       {
         "pattern": "rm -rf /",
         "description": "recursive force delete",
+        "tools": ["bash"],
+        "targets": ["command"],
         "requireConfirmation": false
       },
       {
         "pattern": "sudo",
         "description": "superuser command",
+        "tools": ["bash"],
+        "targets": ["command"],
         "requireConfirmation": false
+      },
+      {
+        "pattern": "child_process\\.(exec|execSync|spawn|spawnSync)\\s*\\(",
+        "description": "node shell/process execution in generated code",
+        "tools": ["write", "edit"],
+        "targets": ["content"],
+        "requireConfirmation": true
+      },
+      {
+        "pattern": "\\b(subprocess\\.(run|Popen|call|check_output)|os\\.system)\\s*\\(",
+        "description": "python shell/process execution in generated code",
+        "tools": ["write", "edit"],
+        "targets": ["content"],
+        "requireConfirmation": true
       }
     ]
   }

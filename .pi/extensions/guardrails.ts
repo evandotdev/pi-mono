@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEvent } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
@@ -10,10 +10,14 @@ interface PathRule {
 	description?: string;
 }
 
+type PermissionTarget = "command" | "path" | "content";
+
 interface PermissionPatternRule {
 	pattern: string;
 	description?: string;
 	requireConfirmation?: boolean;
+	tools?: string[];
+	targets?: PermissionTarget[];
 }
 
 interface GuardrailsConfig {
@@ -42,6 +46,8 @@ interface PartialGuardrailsConfig {
 interface CompiledPermissionRule {
 	rule: PermissionPatternRule;
 	regex: RegExp;
+	tools: Set<string> | null;
+	targets: Set<PermissionTarget> | null;
 }
 
 const DEFAULT_CONFIG: GuardrailsConfig = {
@@ -94,6 +100,7 @@ function parsePermissionPatternRules(value: unknown, fieldName: string): Permiss
 	if (value === undefined) return undefined;
 	if (!Array.isArray(value)) throw new Error(`${fieldName} must be an array`);
 
+	const allowedTargets = new Set<PermissionTarget>(["command", "path", "content"]);
 	const rules: PermissionPatternRule[] = [];
 	for (const item of value) {
 		if (!isRecord(item)) throw new Error(`${fieldName} entries must be objects`);
@@ -104,10 +111,35 @@ function parsePermissionPatternRules(value: unknown, fieldName: string): Permiss
 		if (item.requireConfirmation !== undefined && typeof item.requireConfirmation !== "boolean") {
 			throw new Error(`${fieldName}[].requireConfirmation must be a boolean`);
 		}
+
+		let tools: string[] | undefined;
+		if (item.tools !== undefined) {
+			if (!Array.isArray(item.tools)) throw new Error(`${fieldName}[].tools must be an array of strings`);
+			tools = item.tools.map((tool, toolIndex) => {
+				if (typeof tool !== "string" || tool.trim() === "") {
+					throw new Error(`${fieldName}[].tools[${toolIndex}] must be a non-empty string`);
+				}
+				return tool.trim();
+			});
+		}
+
+		let targets: PermissionTarget[] | undefined;
+		if (item.targets !== undefined) {
+			if (!Array.isArray(item.targets)) throw new Error(`${fieldName}[].targets must be an array`);
+			targets = item.targets.map((target, targetIndex) => {
+				if (typeof target !== "string" || !allowedTargets.has(target as PermissionTarget)) {
+					throw new Error(`${fieldName}[].targets[${targetIndex}] must be one of: command, path, content`);
+				}
+				return target as PermissionTarget;
+			});
+		}
+
 		rules.push({
 			pattern: item.pattern,
 			description: item.description,
 			requireConfirmation: item.requireConfirmation,
+			tools,
+			targets,
 		});
 	}
 
@@ -180,6 +212,28 @@ function formatRuleDescription(rule: PathRule | PermissionPatternRule, fallback:
 	return rule.description?.trim() || fallback;
 }
 
+interface PermissionRuleInput {
+	target: PermissionTarget;
+	value: string;
+}
+
+const DEFAULT_PERMISSION_GATE_TOOLS = new Set(["bash"]);
+
+const DEFAULT_PERMISSION_GATE_TARGETS: Record<string, PermissionTarget[]> = {
+	bash: ["command"],
+	read: ["path"],
+	write: ["path", "content"],
+	edit: ["path", "content"],
+	grep: ["path"],
+	find: ["path"],
+	ls: ["path"],
+};
+
+function matchesRegex(regex: RegExp, value: string): boolean {
+	regex.lastIndex = 0;
+	return regex.test(value);
+}
+
 type GuardrailsConfigScope = "project" | "global" | "repo-default";
 
 export default function (pi: ExtensionAPI) {
@@ -191,7 +245,9 @@ export default function (pi: ExtensionAPI) {
 		const compiled: CompiledPermissionRule[] = [];
 		for (const rule of rawRules) {
 			try {
-				compiled.push({ rule, regex: new RegExp(rule.pattern) });
+				const tools = rule.tools?.length ? new Set(rule.tools.map((tool) => tool.toLowerCase())) : null;
+				const targets = rule.targets?.length ? new Set(rule.targets) : null;
+				compiled.push({ rule, regex: new RegExp(rule.pattern), tools, targets });
 			} catch {
 				notify(`Guardrails: invalid regex ignored: ${rule.pattern}`);
 			}
@@ -218,7 +274,71 @@ export default function (pi: ExtensionAPI) {
 		const regex = new RegExp(`^${regexPattern}$|^${regexPattern}/|/${regexPattern}$|/${regexPattern}/`);
 		const relativePath = path.relative(cwd, targetPath);
 
-		return regex.test(targetPath) || regex.test(relativePath) || targetPath.includes(resolvedPattern) || relativePath.includes(resolvedPattern);
+		return regex.test(targetPath) || regex.test(relativePath);
+	}
+
+	function escapeRegExp(value: string): string {
+		return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	}
+
+	function commandReferencesPathPattern(command: string, pattern: string): boolean {
+		const normalizedPattern = pattern.trim();
+		if (normalizedPattern.length === 0) return false;
+
+		const wildcardPattern = escapeRegExp(normalizedPattern).replace(/\\\*/g, "[^\\s\"'|&;<>]*");
+		const boundaryChars = "[\\s\"'=:/\\\\|&;,<>(){}\\[\\]]";
+		const needsSuffixBoundary = !normalizedPattern.endsWith("/");
+		const suffix = needsSuffixBoundary ? `(?=$|${boundaryChars})` : "";
+		const regex = new RegExp(`(^|${boundaryChars})${wildcardPattern}${suffix}`);
+
+		return regex.test(command);
+	}
+
+	function getPermissionRuleInputs(event: ToolCallEvent): PermissionRuleInput[] {
+		const inputs: PermissionRuleInput[] = [];
+
+		if (isToolCallEventType("bash", event)) {
+			inputs.push({ target: "command", value: event.input.command });
+			return inputs;
+		}
+
+		if (isToolCallEventType("read", event) || isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
+			inputs.push({ target: "path", value: event.input.path });
+		}
+
+		if (isToolCallEventType("grep", event)) {
+			inputs.push({ target: "path", value: event.input.path || "." });
+			if (event.input.glob) inputs.push({ target: "path", value: event.input.glob });
+		}
+
+		if (isToolCallEventType("find", event) || isToolCallEventType("ls", event)) {
+			inputs.push({ target: "path", value: event.input.path || "." });
+		}
+
+		if (isToolCallEventType("write", event)) {
+			inputs.push({ target: "content", value: event.input.content });
+		}
+
+		if (isToolCallEventType("edit", event)) {
+			for (const edit of event.input.edits) {
+				inputs.push({ target: "content", value: edit.newText });
+			}
+		}
+
+		return inputs;
+	}
+
+	function getDefaultPermissionTargets(toolName: string): Set<PermissionTarget> {
+		const defaults = DEFAULT_PERMISSION_GATE_TARGETS[toolName];
+		return new Set(defaults ?? []);
+	}
+
+	function resolvePermissionRuleTools(rule: CompiledPermissionRule): Set<string> {
+		return rule.tools ?? DEFAULT_PERMISSION_GATE_TOOLS;
+	}
+
+	function resolvePermissionRuleTargets(rule: CompiledPermissionRule, toolName: string): Set<PermissionTarget> {
+		return rule.targets ?? getDefaultPermissionTargets(toolName);
 	}
 
 	function resolveConfig(cwd: string) {
@@ -406,7 +526,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (isToolCallEventType("grep", event) && event.input.glob) {
 				for (const rule of config.pathProtection.zeroAccess) {
-					if (event.input.glob.includes(rule.pattern) || isPathMatch(event.input.glob, rule.pattern, ctx.cwd)) {
+					if (isPathMatch(event.input.glob, rule.pattern, ctx.cwd)) {
 						violationReason = `Glob matches restricted path: ${formatRuleDescription(rule, rule.pattern)}`;
 						break;
 					}
@@ -418,22 +538,34 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 
+		if (!violationReason && config.features.permissionGate) {
+			const permissionInputs = getPermissionRuleInputs(event);
+			const toolName = event.toolName.toLowerCase();
+
+			ruleLoop: for (const rule of compiledPermissionRules) {
+				const allowedTools = resolvePermissionRuleTools(rule);
+				if (!allowedTools.has(toolName)) continue;
+
+				const allowedTargets = resolvePermissionRuleTargets(rule, toolName);
+				if (allowedTargets.size === 0) continue;
+
+				for (const input of permissionInputs) {
+					if (!allowedTargets.has(input.target)) continue;
+					if (!matchesRegex(rule.regex, input.value)) continue;
+
+					violationReason = formatRuleDescription(rule.rule, rule.rule.pattern);
+					shouldAsk = rule.rule.requireConfirmation ?? false;
+					break ruleLoop;
+				}
+			}
+		}
+
 		if (!violationReason && isToolCallEventType("bash", event)) {
 			const command = event.input.command;
 
-			if (config.features.permissionGate) {
-				for (const { rule, regex } of compiledPermissionRules) {
-					if (regex.test(command)) {
-						violationReason = formatRuleDescription(rule, rule.pattern);
-						shouldAsk = rule.requireConfirmation ?? false;
-						break;
-					}
-				}
-			}
-
 			if (!violationReason && config.features.pathProtection) {
 				for (const rule of config.pathProtection.zeroAccess) {
-					if (command.includes(rule.pattern)) {
+					if (commandReferencesPathPattern(command, rule.pattern)) {
 						violationReason = `Bash command references restricted path: ${formatRuleDescription(rule, rule.pattern)}`;
 						break;
 					}
@@ -442,7 +574,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (!violationReason && config.features.pathProtection) {
 				for (const rule of config.pathProtection.readOnly) {
-					if (command.includes(rule.pattern) && (/[^\S\r\n]*[>|]/.test(command) || command.includes("rm") || command.includes("mv") || command.includes("sed"))) {
+					if (commandReferencesPathPattern(command, rule.pattern) && (/[^\S\r\n]*[>|]/.test(command) || command.includes("rm") || command.includes("mv") || command.includes("sed"))) {
 						violationReason = `Bash command may modify read-only path: ${formatRuleDescription(rule, rule.pattern)}`;
 						break;
 					}
@@ -451,7 +583,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (!violationReason && config.features.pathProtection) {
 				for (const rule of config.pathProtection.noDelete) {
-					if (command.includes(rule.pattern) && (command.includes("rm") || command.includes("mv"))) {
+					if (commandReferencesPathPattern(command, rule.pattern) && (command.includes("rm") || command.includes("mv"))) {
 						violationReason = `Bash command attempts to delete protected path: ${formatRuleDescription(rule, rule.pattern)}`;
 						break;
 					}
@@ -472,14 +604,40 @@ export default function (pi: ExtensionAPI) {
 
 		if (violationReason) {
 			const scopeSuffix = activeConfigScopes.length > 0 ? `\n\nConfig scopes: ${activeConfigScopes.join(" | ")}` : "";
+			const commandSummary = isToolCallEventType("bash", event) ? event.input.command : JSON.stringify(event.input);
 			if (shouldAsk) {
+				pi.sendMessage({
+					customType: "guardrails-confirmation",
+					content: `Guardrails requires confirmation for ${event.toolName}.\n\nReason: ${violationReason}\n\nCommand:\n\`\`\`\n${commandSummary}\n\`\`\``,
+					display: true,
+					details: {
+						phase: "prompt",
+						tool: event.toolName,
+						rule: violationReason,
+						command: commandSummary,
+						timestamp: Date.now(),
+					},
+				});
+
 				const confirmed = await ctx.ui.confirm(
 					"Guardrails Confirmation",
-					`Dangerous command detected: ${violationReason}\n\nCommand: ${isToolCallEventType("bash", event) ? event.input.command : JSON.stringify(event.input)}\n\nDo you want to proceed?`,
+					`Dangerous command detected: ${violationReason}\n\nCommand: ${commandSummary}\n\nDo you want to proceed?`,
 					{ timeout: 30000 },
 				);
 
 				if (!confirmed) {
+					pi.sendMessage({
+						customType: "guardrails-confirmation",
+						content: `Guardrails blocked ${event.toolName} after confirmation prompt.\n\nReason: ${violationReason}`,
+						display: true,
+						details: {
+							phase: "blocked_by_user",
+							tool: event.toolName,
+							rule: violationReason,
+							command: commandSummary,
+							timestamp: Date.now(),
+						},
+					});
 					ctx.ui.setStatus(`Guardrails blocked: ${violationReason.slice(0, 40)}`);
 					pi.appendEntry("guardrails-log", { tool: event.toolName, input: event.input, rule: violationReason, action: "blocked_by_user" });
 					ctx.abort();
@@ -489,6 +647,18 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
+				pi.sendMessage({
+					customType: "guardrails-confirmation",
+					content: `Guardrails confirmation approved for ${event.toolName}.\n\nReason: ${violationReason}`,
+					display: true,
+					details: {
+						phase: "confirmed_by_user",
+						tool: event.toolName,
+						rule: violationReason,
+						command: commandSummary,
+						timestamp: Date.now(),
+					},
+				});
 				pi.appendEntry("guardrails-log", { tool: event.toolName, input: event.input, rule: violationReason, action: "confirmed_by_user" });
 				return { block: false };
 			}
