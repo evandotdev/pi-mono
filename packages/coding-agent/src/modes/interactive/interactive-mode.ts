@@ -66,7 +66,7 @@ import { type SessionContext, SessionManager } from "../../core/session-manager.
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
-import { UsageService } from "../../core/usage-service.js";
+import { formatUsageReport, UsageService } from "../../core/usage-service.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.js";
@@ -2314,6 +2314,11 @@ export class InteractiveMode {
 			if (text === "/context" || text.startsWith("/context ")) {
 				this.editor.setText("");
 				await this.handleContextCommand(text);
+				return;
+			}
+			if (text === "/usage") {
+				this.editor.setText("");
+				await this.handleUsageCommand();
 				return;
 			}
 			if (text === "/reload") {
@@ -4734,6 +4739,25 @@ export class InteractiveMode {
 
 	private formatTokenCount(tokens: number): string {
 		return tokens.toLocaleString();
+	}
+
+	private async handleUsageCommand(): Promise<void> {
+		if (!this.usageService) {
+			this.showWarning("Usage tracking is not available.");
+			return;
+		}
+
+		// Refresh all providers before displaying
+		for (const providerId of this.session.modelRegistry.authStorage.list()) {
+			await this.usageService.refreshProvider(providerId);
+		}
+
+		const accountUsage = this.usageService.getAllAccountUsage();
+		const report = formatUsageReport(accountUsage);
+
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(`${theme.bold("Provider Usage")}\n\n${report}`, 1, 0));
+		this.ui.requestRender();
 	}
 
 	private async handleContextCommand(text: string): Promise<void> {

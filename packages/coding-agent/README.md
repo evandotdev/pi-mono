@@ -125,6 +125,8 @@ For each built-in provider, pi maintains a list of tool-capable models, updated 
 
 See [docs/providers.md](docs/providers.md) for detailed setup instructions.
 
+When using OAuth, pi shows subscription/quota utilization windows in interactive mode (footer and account selector) for providers that expose usage APIs: Anthropic, OpenAI Codex, and Google Antigravity.
+
 **Custom providers & models:** Add providers via `~/.pi/agent/models.json` if they speak a supported API (OpenAI, Anthropic, Google). For custom APIs or OAuth, use extensions. See [docs/models.md](docs/models.md) and [docs/custom-provider.md](docs/custom-provider.md).
 
 ---

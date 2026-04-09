@@ -6,11 +6,13 @@ import {
 	convertToLlm,
 	createExtensionRuntime,
 	formatSkillsForPrompt,
+	formatUsageReport,
 	loadSkillsFromDir,
 	ModelRegistry,
 	type ResourceLoader,
 	SessionManager,
 	type Skill,
+	UsageService,
 } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
@@ -528,6 +530,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		baseToolsOverride,
 	});
 
+	// Usage service for /usage command (no background polling, on-demand only)
+	const usageService = new UsageService(authStorage, () => {});
+
 	const getModelCandidates = (): Model<Api>[] => {
 		if (session.scopedModels.length > 0) {
 			return session.scopedModels.map((scoped) => scoped.model);
@@ -841,6 +846,22 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		return true;
 	};
 
+	const handleUsageCommand = async (text: string, ctx: SlackContext): Promise<boolean> => {
+		if (text !== "/usage") {
+			return false;
+		}
+
+		// Refresh all providers before displaying
+		for (const providerId of authStorage.list()) {
+			await usageService.refreshProvider(providerId);
+		}
+
+		const accountUsage = usageService.getAllAccountUsage();
+		const report = formatUsageReport(accountUsage);
+		await ctx.respond(report);
+		return true;
+	};
+
 	const handleSlashCommand = async (text: string, ctx: SlackContext): Promise<boolean> => {
 		const trimmed = text.trim();
 		if (!trimmed.startsWith("/")) {
@@ -850,6 +871,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			return true;
 		}
 		if (await handleModelCommand(trimmed, ctx)) {
+			return true;
+		}
+		if (await handleUsageCommand(trimmed, ctx)) {
 			return true;
 		}
 		return false;

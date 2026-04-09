@@ -290,6 +290,8 @@ export {
 	writeTool,
 	writeToolDefinition,
 } from "./core/tools/index.js";
+// Usage tracking
+export { formatUsageReport, type OAuthAccountUsage, UsageService } from "./core/usage-service.js";
 // Main entry point
 export { type MainOptions, main } from "./main.js";
 // Run modes for programmatic SDK usage

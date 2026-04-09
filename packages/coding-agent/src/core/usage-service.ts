@@ -24,6 +24,65 @@ export type OAuthAccountUsage = {
 	active: boolean;
 };
 
+/**
+ * Format a duration in milliseconds to a human-readable string like "3h11m" or "42m".
+ */
+function formatResetDuration(ms: number): string {
+	if (ms <= 0) return "now";
+	const h = Math.floor(ms / 3600000);
+	const m = Math.floor((ms % 3600000) / 60000);
+	if (h > 0) return `${h}h${m}m`;
+	return `${m}m`;
+}
+
+/**
+ * Format a usage report for all providers that have OAuth usage data.
+ * Returns a plain-text string (no ANSI codes) suitable for both TUI and Slack.
+ *
+ * @param accountUsage - Map of provider ID to array of account usage entries
+ */
+export function formatUsageReport(accountUsage: ReadonlyMap<string, readonly OAuthAccountUsage[]>): string {
+	if (accountUsage.size === 0) {
+		return "No usage data available. Only OAuth providers with usage tracking are shown.";
+	}
+
+	const sections: string[] = [];
+
+	for (const [providerId, accounts] of accountUsage) {
+		const lines: string[] = [];
+		lines.push(providerId);
+
+		for (const account of accounts) {
+			const accountLabel = account.accountId
+				? `Account ${account.credentialIndex + 1} (${account.accountId.slice(0, 8)})`
+				: `Account ${account.credentialIndex + 1}`;
+			const activeTag = account.active ? " [active]" : "";
+			lines.push(`  ${accountLabel}${activeTag}`);
+
+			const windows = Object.entries(account.usage.windows).sort((a, b) => {
+				const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+				const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+				if (resetA !== resetB) return resetA - resetB;
+				return a[0].localeCompare(b[0]);
+			});
+
+			for (const [windowName, window] of windows) {
+				const pct = Math.round(window.utilizationPercent);
+				let resetStr = "";
+				if (window.resetsAt !== undefined) {
+					const remaining = window.resetsAt - Date.now();
+					resetStr = remaining > 0 ? `  resets in ${formatResetDuration(remaining)}` : "  resetting now";
+				}
+				lines.push(`    ${windowName}: ${pct}%${resetStr}`);
+			}
+		}
+
+		sections.push(lines.join("\n"));
+	}
+
+	return sections.join("\n\n");
+}
+
 export class UsageService {
 	private cache = new Map<string, CacheEntry>();
 	private accountUsage = new Map<string, OAuthAccountUsage[]>();
