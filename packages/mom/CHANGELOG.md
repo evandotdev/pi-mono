@@ -12,6 +12,10 @@
 
 - Disabled host sandbox mode; Docker is now the only supported sandbox type.
 
+### Fixed
+
+- Mom now preserves the model and thinking level configured via `/model` and `/thinking` across restarts.
+
 ## [0.67.2] - 2026-04-14
 
 ## [0.67.1] - 2026-04-13

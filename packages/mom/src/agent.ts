@@ -477,12 +477,32 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const authStorage = AuthStorage.create(join(homedir(), ".pi", "mom", "auth.json"));
 	const modelRegistry = ModelRegistry.create(authStorage);
 
+	// Load existing messages and context
+	const loadedSession = sessionManager.buildSessionContext();
+
+	let sessionModel: Model<Api> = model as Model<Api>;
+	if (loadedSession.model) {
+		const found = modelRegistry.find(loadedSession.model.provider, loadedSession.model.modelId);
+		if (found) {
+			sessionModel = found;
+		} else {
+			log.logWarning(
+				`[${channelId}] Could not find restored model ${loadedSession.model.provider}/${loadedSession.model.modelId}, falling back to default`,
+			);
+		}
+	}
+
+	let thinkingLevel: ThinkingLevel = "off";
+	if (loadedSession.thinkingLevel && THINKING_LEVEL_ORDER.includes(loadedSession.thinkingLevel as ThinkingLevel)) {
+		thinkingLevel = loadedSession.thinkingLevel as ThinkingLevel;
+	}
+
 	// Create agent
 	const agent = new Agent({
 		initialState: {
 			systemPrompt,
-			model,
-			thinkingLevel: "off",
+			model: sessionModel,
+			thinkingLevel,
 			tools,
 		},
 		convertToLlm,
@@ -498,8 +518,6 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		},
 	});
 
-	// Load existing messages
-	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
 		agent.state.messages = loadedSession.messages;
 		log.logInfo(`[${channelId}] Loaded ${loadedSession.messages.length} messages from context.jsonl`);
