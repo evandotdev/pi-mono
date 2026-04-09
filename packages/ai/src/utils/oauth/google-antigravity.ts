@@ -9,7 +9,7 @@
 import type { Server } from "node:http";
 import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.js";
 import { generatePKCE } from "./pkce.js";
-import type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderInterface } from "./types.js";
+import type { OAuthCredentials, OAuthLoginCallbacks, OAuthProviderInterface, ProviderUsage } from "./types.js";
 
 type AntigravityCredentials = OAuthCredentials & {
 	projectId: string;
@@ -42,6 +42,18 @@ const SCOPES = [
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+const ANTIGRAVITY_USAGE_ENDPOINTS = [
+	"https://cloudcode-pa.googleapis.com",
+	"https://daily-cloudcode-pa.sandbox.googleapis.com",
+	"https://autopush-cloudcode-pa.sandbox.googleapis.com",
+];
+const DEFAULT_ANTIGRAVITY_VERSION = "1.18.4";
+const CLOUD_CODE_METADATA = {
+	ideType: "IDE_UNSPECIFIED",
+	platform: "PLATFORM_UNSPECIFIED",
+	pluginType: "GEMINI",
+};
 
 // Fallback project ID when discovery fails
 const DEFAULT_PROJECT_ID = "rising-fact-p41fc";
@@ -139,6 +151,105 @@ function parseRedirectUrl(input: string): { code?: string; state?: string } {
 		// Not a URL, return empty
 		return {};
 	}
+}
+
+function getAntigravityHeaders(accessToken: string): Record<string, string> {
+	const version = process.env.PI_AI_ANTIGRAVITY_VERSION || DEFAULT_ANTIGRAVITY_VERSION;
+	return {
+		Authorization: `Bearer ${accessToken}`,
+		"Content-Type": "application/json",
+		Accept: "application/json",
+		"User-Agent": `antigravity/${version} darwin/arm64`,
+		"X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+		"Client-Metadata": JSON.stringify(CLOUD_CODE_METADATA),
+	};
+}
+
+function extractProjectId(projectValue: string | { id?: string } | undefined): string | undefined {
+	if (typeof projectValue === "string" && projectValue.length > 0) return projectValue;
+	if (
+		projectValue &&
+		typeof projectValue === "object" &&
+		typeof projectValue.id === "string" &&
+		projectValue.id.length > 0
+	) {
+		return projectValue.id;
+	}
+	return undefined;
+}
+
+function parseResetsAt(resetTime?: string): number | undefined {
+	if (!resetTime) return undefined;
+	const parsed = Date.parse(resetTime);
+	if (Number.isNaN(parsed)) return undefined;
+	return parsed;
+}
+
+function usageWindowForModel(modelId: string): string | undefined {
+	if (modelId.startsWith("claude-")) return "claude";
+	if (modelId.startsWith("gemini-3-flash")) return "gemini-flash";
+	if (modelId.startsWith("gemini-3.1-pro") || modelId.startsWith("gemini-3-pro")) return "gemini-pro";
+	if (modelId.startsWith("gpt-oss-")) return "gpt-oss";
+	return undefined;
+}
+
+function toUtilizationPercent(
+	remainingFraction: number | undefined,
+	isExhausted: boolean | undefined,
+): number | undefined {
+	if (typeof remainingFraction === "number") {
+		const percent = Number(((1 - remainingFraction) * 100).toFixed(2));
+		return Math.max(0, Math.min(100, percent));
+	}
+	if (isExhausted) return 100;
+	return undefined;
+}
+
+type FetchAvailableModelsPayload = {
+	models?: Record<
+		string,
+		{
+			quotaInfo?: {
+				remainingFraction?: number;
+				resetTime?: string;
+				isExhausted?: boolean;
+			};
+		}
+	>;
+};
+
+function parseUsageFromModels(payload: FetchAvailableModelsPayload): ProviderUsage | null {
+	const windows: ProviderUsage["windows"] = {};
+
+	for (const [modelId, modelData] of Object.entries(payload.models ?? {})) {
+		const windowName = usageWindowForModel(modelId);
+		if (!windowName) continue;
+
+		const quota = modelData.quotaInfo;
+		const utilizationPercent = toUtilizationPercent(quota?.remainingFraction, quota?.isExhausted);
+		if (utilizationPercent === undefined) continue;
+
+		const resetsAt = parseResetsAt(quota?.resetTime);
+		const existing = windows[windowName];
+		if (!existing) {
+			windows[windowName] = { utilizationPercent, resetsAt };
+			continue;
+		}
+
+		const existingReset = existing.resetsAt;
+		const nextReset =
+			existingReset === undefined
+				? resetsAt
+				: resetsAt === undefined
+					? existingReset
+					: Math.min(existingReset, resetsAt);
+		windows[windowName] = {
+			utilizationPercent: Math.max(existing.utilizationPercent, utilizationPercent),
+			resetsAt: nextReset,
+		};
+	}
+
+	return Object.keys(windows).length > 0 ? { windows } : null;
 }
 
 interface LoadCodeAssistPayload {
@@ -449,5 +560,42 @@ export const antigravityOAuthProvider: OAuthProviderInterface = {
 	getApiKey(credentials: OAuthCredentials): string {
 		const creds = credentials as AntigravityCredentials;
 		return JSON.stringify({ token: creds.access, projectId: creds.projectId });
+	},
+
+	async fetchUsage(credentials: OAuthCredentials): Promise<ProviderUsage | null> {
+		const creds = credentials as AntigravityCredentials;
+		const headers = getAntigravityHeaders(creds.access);
+
+		for (const endpoint of ANTIGRAVITY_USAGE_ENDPOINTS) {
+			try {
+				const loadResponse = await fetch(`${endpoint}/v1internal:loadCodeAssist`, {
+					method: "POST",
+					headers,
+					body: JSON.stringify({ metadata: CLOUD_CODE_METADATA }),
+					signal: AbortSignal.timeout(5000),
+				});
+				if (!loadResponse.ok) continue;
+
+				const loadData = (await loadResponse.json()) as LoadCodeAssistPayload;
+				const projectId = extractProjectId(loadData.cloudaicompanionProject) ?? creds.projectId;
+				if (!projectId) continue;
+
+				const modelsResponse = await fetch(`${endpoint}/v1internal:fetchAvailableModels`, {
+					method: "POST",
+					headers,
+					body: JSON.stringify({ project: projectId }),
+					signal: AbortSignal.timeout(5000),
+				});
+				if (!modelsResponse.ok) continue;
+
+				const modelsPayload = (await modelsResponse.json()) as FetchAvailableModelsPayload;
+				const usage = parseUsageFromModels(modelsPayload);
+				if (usage) return usage;
+			} catch {
+				// Try the next endpoint
+			}
+		}
+
+		return null;
 	},
 };
