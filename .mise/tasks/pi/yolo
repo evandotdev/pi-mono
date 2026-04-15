@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run pi directly from local source (no Docker sandbox)"
+#MISE raw=true
+#MISE dir="{{cwd}}"
+set -euo pipefail
+
+"${MISE_PROJECT_ROOT}/pi-test.sh" "$@"

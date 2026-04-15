@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run pi in Docker sandbox"
+#MISE raw=true
+#MISE dir="{{cwd}}"
+set -euo pipefail
+
+"${MISE_PROJECT_ROOT}/scripts/pi-sandbox.sh" "$@"

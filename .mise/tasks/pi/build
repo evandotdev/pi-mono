@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build/rebuild pi sandbox Docker image"
+set -euo pipefail
+
+"${MISE_PROJECT_ROOT}/scripts/pi-sandbox-build.sh" "$@"

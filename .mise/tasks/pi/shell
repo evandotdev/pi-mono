@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Open bash shell in pi sandbox container"
+#MISE raw=true
+#MISE dir="{{cwd}}"
+set -euo pipefail
+
+PI_SANDBOX_LAUNCH_MODE=shell "${MISE_PROJECT_ROOT}/scripts/pi-sandbox.sh" "$@"

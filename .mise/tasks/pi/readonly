@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run pi in read-only sandbox mode"
+#MISE raw=true
+#MISE dir="{{cwd}}"
+set -euo pipefail
+
+PI_SANDBOX_LAUNCH_MODE=readonly "${MISE_PROJECT_ROOT}/scripts/pi-sandbox.sh" "$@"

@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "image": "pi-sandbox:latest",
+  "network": "bridge",
+  "folders": [
+    "."
+  ],
+  "pullOnStart": false,
+  "runArgs": [
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges",
+    "--ipc=none"
+  ],
+  "passEnv": true
+}
