@@ -281,8 +281,10 @@ export function expandPromptTemplate(text: string, templates: PromptTemplate[]):
 	if (!text.startsWith("/")) return text;
 
 	const spaceIndex = text.indexOf(" ");
-	const templateName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+	const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 	const argsString = spaceIndex === -1 ? "" : text.slice(spaceIndex + 1);
+	const templateName = commandName.startsWith("prompt:") ? commandName.slice("prompt:".length) : commandName;
+	if (!templateName) return text;
 
 	const template = templates.find((t) => t.name === templateName);
 	if (template) {

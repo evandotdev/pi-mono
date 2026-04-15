@@ -471,11 +471,24 @@ export class InteractiveMode {
 			};
 		}
 
-		// Convert prompt templates to SlashCommand format for autocomplete
-		const templateCommands: SlashCommand[] = this.session.promptTemplates.map((cmd) => ({
-			name: cmd.name,
-			description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
-		}));
+		// Convert prompt templates to SlashCommand format for autocomplete.
+		// Register both /name and /prompt:name.
+		const templateCommands: SlashCommand[] = this.session.promptTemplates.flatMap((cmd) => {
+			const description = this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo);
+			const commands: SlashCommand[] = [
+				{
+					name: cmd.name,
+					description,
+				},
+			];
+			if (!cmd.name.startsWith("prompt:")) {
+				commands.push({
+					name: `prompt:${cmd.name}`,
+					description: description ? `${description} (alias)` : "Prompt template alias",
+				});
+			}
+			return commands;
+		});
 
 		// Convert extension commands to SlashCommand format
 		const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
@@ -5031,6 +5044,9 @@ export class InteractiveMode {
 		for (const template of this.session.promptTemplates) {
 			const description = template.description ?? "";
 			hotkeys += `| \`/${template.name}\` | prompt | ${escapeMarkdownCell(description)} |\n`;
+			if (!template.name.startsWith("prompt:")) {
+				hotkeys += `| \`/prompt:${template.name}\` | prompt | ${escapeMarkdownCell(description ? `${description} (alias)` : "alias")} |\n`;
+			}
 		}
 
 		if (this.settingsManager.getEnableSkillCommands()) {
