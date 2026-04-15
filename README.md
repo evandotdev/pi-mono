@@ -92,6 +92,41 @@ npm run check        # Lint, format, and type check
 
 > **Note:** `npm run check` requires `npm run build` to be run first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
 
+### Sandbox and stow tasks (mise)
+
+Inside `pi-mono`, these tasks run pi through the Docker sandbox tooling added in this repo:
+
+```bash
+mise run pi                # Sandbox mode (default)
+mise run pi:readonly       # Read-only sandbox mode
+mise run pi:shell          # Open bash in sandbox container
+mise run pi:yolo           # Run directly from source (no sandbox)
+mise run pi:build          # Build/rebuild sandbox image
+```
+
+To make these `pi:*` tasks available machine-wide (so `mise run pi` works from any directory), stow the global mise task package from this repo:
+
+```bash
+mise run pi:stow:mise:install
+```
+
+To remove those global task symlinks later:
+
+```bash
+mise run pi:stow:mise:uninstall
+```
+
+Global wrappers default to `~/pi-mono`. If your checkout lives elsewhere, set `PI_MONO_ROOT`.
+
+To manage `~/.pi` from the repo's `.pi` directory:
+
+```bash
+mise run pi:stow:install
+mise run pi:stow:uninstall
+```
+
+`pi:stow:install` writes a manifest to `~/.pi/.pi-mono-stow-manifest`.
+
 ## License
 
 MIT

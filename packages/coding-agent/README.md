@@ -167,9 +167,9 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/thinking [off\|minimal\|low\|medium\|high\|xhigh]` | Show or set the thinking level |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
-| `/resume` | Pick from previous sessions |
-| `/new` | Start a new session |
-| `/name <name>` | Set session display name |
+| `/session:resume`, `/resume` | Pick from previous sessions |
+| `/session:new`, `/new` | Start a new session |
+| `/session:name <name>`, `/session:rename <name>`, `/name <name>` | Set session display name |
 | `/session` | Show session info (path, tokens, cost) |
 | `/context [show\|clear]` | Show context source breakdown or clear current branch context |
 | `/tree` | Jump to any point in the session and continue from there |
@@ -177,7 +177,9 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/compact [prompt]` | Manually compact context, optional custom instructions |
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML file |
+| `/import [file]` | Import and resume a session from a JSONL file |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
+| `/usage` | Show OAuth provider usage across all accounts |
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files (themes hot-reload automatically) |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
@@ -603,6 +605,21 @@ pi --thinking high "Solve this complex problem"
 ## Contributing & Development
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for guidelines and [docs/development.md](docs/development.md) for setup, forking, and debugging.
+
+For the `pi-mono` fork workflow, run pi from source with monorepo mise tasks:
+
+```bash
+mise run pi
+mise run pi:readonly
+mise run pi:shell
+mise run pi:yolo
+```
+
+To install those `pi:*` tasks globally via stow (so `mise run pi` works from any directory), run from `~/pi-mono`:
+
+```bash
+mise run pi:stow:mise:install
+```
 
 ---
 
