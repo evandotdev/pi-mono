@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+#MISE description="Unstow global mise pi tasks from ~/.config/mise"
+set -euo pipefail
+
+REPO_ROOT="${MISE_PROJECT_ROOT}"
+STOW_ROOT="${REPO_ROOT}/stow"
+PACKAGE_NAME="mise"
+TARGET_ROOT="${HOME}"
+MISE_CONFIG_DIR="${HOME}/.config/mise"
+MANIFEST_PATH="${MISE_CONFIG_DIR}/.pi-mono-stow-manifest-mise"
+BACKUP_ROOT="${MISE_CONFIG_DIR}/.pi-mono-stow-backups/mise"
+
+if ! command -v stow >/dev/null 2>&1; then
+  echo "pi:stow:mise:uninstall: 'stow' is not installed." >&2
+  echo "Install GNU stow and rerun this command." >&2
+  exit 1
+fi
+
+if [[ -d "${STOW_ROOT}/${PACKAGE_NAME}" ]]; then
+  stow --dir "${STOW_ROOT}" --target "${TARGET_ROOT}" -D --no-folding "${PACKAGE_NAME}"
+fi
+
+restored_count=0
+if [[ -f "${MANIFEST_PATH}" ]]; then
+  timestamp=""
+  while IFS= read -r line; do
+    if [[ "${line}" == timestamp=* ]]; then
+      timestamp="${line#timestamp=}"
+      break
+    fi
+  done < "${MANIFEST_PATH}"
+
+  if [[ -n "${timestamp}" && -d "${BACKUP_ROOT}/${timestamp}" ]]; then
+    while IFS= read -r rel; do
+      [[ -z "${rel}" ]] && continue
+      [[ "${rel}" == timestamp=* ]] && continue
+
+      backup_path="${BACKUP_ROOT}/${timestamp}/${rel}"
+      dest="${TARGET_ROOT}/${rel}"
+
+      if [[ ! -e "${backup_path}" && ! -L "${backup_path}" ]]; then
+        continue
+      fi
+      if [[ -e "${dest}" || -L "${dest}" ]]; then
+        continue
+      fi
+
+      mkdir -p "$(dirname "${dest}")"
+      mv "${backup_path}" "${dest}"
+      restored_count=$((restored_count + 1))
+    done < "${MANIFEST_PATH}"
+  fi
+
+  rm -f "${MANIFEST_PATH}"
+fi
+
+cat <<EOF
+pi:stow:mise:uninstall completed
+  restored backups: ${restored_count}
+EOF

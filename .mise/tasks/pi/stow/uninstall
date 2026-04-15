@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#MISE description="Unstow repo .pi resources from ~/.pi (remove symlinks)"
+set -euo pipefail
+
+REPO_ROOT="${MISE_PROJECT_ROOT}"
+REPO_PI_DIR="${REPO_ROOT}/.pi"
+GLOBAL_PI_DIR="${HOME}/.pi"
+MANIFEST_PATH="${GLOBAL_PI_DIR}/.pi-mono-stow-manifest"
+
+DEFAULT_ITEMS=(
+  "extensions"
+  "prompts"
+  "skills"
+  "themes"
+  "guardrails.json"
+  "docker-sandbox.json"
+)
+
+if [[ ! -d "${GLOBAL_PI_DIR}" ]]; then
+  echo "pi:stow:uninstall: ${GLOBAL_PI_DIR} does not exist. Nothing to do."
+  exit 0
+fi
+
+items=()
+if [[ -f "${MANIFEST_PATH}" ]]; then
+  while IFS= read -r item; do
+    [[ -z "${item}" ]] && continue
+    items+=("${item}")
+  done < "${MANIFEST_PATH}"
+else
+  items=("${DEFAULT_ITEMS[@]}")
+fi
+
+removed_count=0
+skipped_count=0
+
+for item in "${items[@]}"; do
+  src="${REPO_PI_DIR}/${item}"
+  dest="${GLOBAL_PI_DIR}/${item}"
+
+  if [[ -L "${dest}" && -e "${src}" && "${dest}" -ef "${src}" ]]; then
+    rm "${dest}"
+    removed_count=$((removed_count + 1))
+  else
+    skipped_count=$((skipped_count + 1))
+  fi
+done
+
+rm -f "${MANIFEST_PATH}"
+
+cat <<EOF
+pi:stow:uninstall completed
+  removed symlinks: ${removed_count}
+  skipped entries: ${skipped_count}
+EOF

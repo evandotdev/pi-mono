@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Build/rebuild pi sandbox Docker image (global wrapper)"
+set -euo pipefail
+
+PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"
+PI_SCRIPT="${PI_MONO_ROOT}/scripts/pi-sandbox-build.sh"
+
+if [[ ! -x "${PI_SCRIPT}" ]]; then
+  echo "mise task pi:build: missing executable ${PI_SCRIPT}" >&2
+  echo "Set PI_MONO_ROOT to your pi-mono checkout path." >&2
+  exit 1
+fi
+
+exec "${PI_SCRIPT}" "$@"

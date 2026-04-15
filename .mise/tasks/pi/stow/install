@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+#MISE description="Stow repo .pi resources into ~/.pi (symlink shared resources)"
+set -euo pipefail
+
+REPO_ROOT="${MISE_PROJECT_ROOT}"
+REPO_PI_DIR="${REPO_ROOT}/.pi"
+GLOBAL_PI_DIR="${HOME}/.pi"
+MANIFEST_PATH="${GLOBAL_PI_DIR}/.pi-mono-stow-manifest"
+TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+
+MANAGED_ITEMS=(
+  "extensions"
+  "prompts"
+  "skills"
+  "themes"
+  "guardrails.json"
+  "docker-sandbox.json"
+)
+
+if [[ ! -d "${REPO_PI_DIR}" ]]; then
+  echo "pi:stow:install: repo .pi directory not found: ${REPO_PI_DIR}" >&2
+  exit 1
+fi
+
+if [[ -L "${GLOBAL_PI_DIR}" ]]; then
+  echo "pi:stow:install: ${GLOBAL_PI_DIR} is a symlink. Please replace it with a real directory before using stow mode." >&2
+  exit 1
+fi
+
+mkdir -p "${GLOBAL_PI_DIR}"
+
+TMP_MANIFEST="$(mktemp)"
+trap 'rm -f "${TMP_MANIFEST}"' EXIT
+
+linked_count=0
+already_linked_count=0
+merged_missing_count=0
+conflict_copy_count=0
+
+merge_dir_into_repo() {
+  local item_name="$1"
+  local src_dir="$2"
+  local dest_dir="$3"
+
+  local before_count after_count
+  before_count=$(find "${src_dir}" -mindepth 1 | wc -l | tr -d ' ')
+  # Copy missing files from global into repo (non-destructive).
+  cp -a -n "${dest_dir}/." "${src_dir}/" 2>/dev/null || true
+  after_count=$(find "${src_dir}" -mindepth 1 | wc -l | tr -d ' ')
+  if [[ "${after_count}" =~ ^[0-9]+$ && "${before_count}" =~ ^[0-9]+$ ]]; then
+    local delta=$((after_count - before_count))
+    if ((delta > 0)); then
+      merged_missing_count=$((merged_missing_count + delta))
+    fi
+  fi
+
+  # Preserve differing global files as conflict copies under repo/.pi/.merge-conflicts/<timestamp>/...
+  while IFS= read -r -d '' global_file; do
+    local rel="${global_file#"${dest_dir}/"}"
+    local repo_file="${src_dir}/${rel}"
+    if [[ ! -f "${repo_file}" ]]; then
+      continue
+    fi
+    if cmp -s "${global_file}" "${repo_file}"; then
+      continue
+    fi
+
+    local conflict_path="${REPO_PI_DIR}/.merge-conflicts/${TIMESTAMP}/${item_name}/${rel}.from-global"
+    mkdir -p "$(dirname "${conflict_path}")"
+    cp -a "${global_file}" "${conflict_path}"
+    conflict_copy_count=$((conflict_copy_count + 1))
+  done < <(find "${dest_dir}" -type f -print0)
+}
+
+for item in "${MANAGED_ITEMS[@]}"; do
+  src="${REPO_PI_DIR}/${item}"
+  if [[ ! -e "${src}" && ! -L "${src}" ]]; then
+    continue
+  fi
+
+  dest="${GLOBAL_PI_DIR}/${item}"
+
+  if [[ -L "${dest}" && "${dest}" -ef "${src}" ]]; then
+    already_linked_count=$((already_linked_count + 1))
+    printf '%s\n' "${item}" >> "${TMP_MANIFEST}"
+    continue
+  fi
+
+  if [[ -e "${dest}" || -L "${dest}" ]]; then
+    if [[ -d "${src}" && -d "${dest}" && ! -L "${dest}" ]]; then
+      merge_dir_into_repo "${item}" "${src}" "${dest}"
+    fi
+
+    rm -rf "${dest}"
+  fi
+
+  ln -s "${src}" "${dest}"
+  linked_count=$((linked_count + 1))
+  printf '%s\n' "${item}" >> "${TMP_MANIFEST}"
+done
+
+mv "${TMP_MANIFEST}" "${MANIFEST_PATH}"
+
+cat <<EOF
+pi:stow:install completed
+  linked: ${linked_count}
+  already linked: ${already_linked_count}
+  merged missing entries into repo: ${merged_missing_count}
+  preserved conflicts: ${conflict_copy_count}
+  manifest: ${MANIFEST_PATH}
+EOF

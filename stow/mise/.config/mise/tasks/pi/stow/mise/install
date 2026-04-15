@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Stow global mise pi tasks into ~/.config/mise (global wrapper)"
+set -euo pipefail
+
+PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"
+PI_SCRIPT="${PI_MONO_ROOT}/.mise/tasks/pi/stow/mise/install"
+
+if [[ ! -x "${PI_SCRIPT}" ]]; then
+  echo "mise task pi:stow:mise:install: missing executable ${PI_SCRIPT}" >&2
+  echo "Set PI_MONO_ROOT to your pi-mono checkout path." >&2
+  exit 1
+fi
+
+MISE_PROJECT_ROOT="${PI_MONO_ROOT}" exec "${PI_SCRIPT}" "$@"

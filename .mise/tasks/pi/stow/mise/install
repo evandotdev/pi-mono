@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#MISE description="Stow global mise pi tasks into ~/.config/mise"
+set -euo pipefail
+
+REPO_ROOT="${MISE_PROJECT_ROOT}"
+STOW_ROOT="${REPO_ROOT}/stow"
+PACKAGE_NAME="mise"
+PACKAGE_ROOT="${STOW_ROOT}/${PACKAGE_NAME}"
+TARGET_ROOT="${HOME}"
+MISE_CONFIG_DIR="${HOME}/.config/mise"
+BACKUP_ROOT="${MISE_CONFIG_DIR}/.pi-mono-stow-backups/mise"
+MANIFEST_PATH="${MISE_CONFIG_DIR}/.pi-mono-stow-manifest-mise"
+TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+
+if ! command -v stow >/dev/null 2>&1; then
+  echo "pi:stow:mise:install: 'stow' is not installed." >&2
+  echo "Install GNU stow and rerun this command." >&2
+  exit 1
+fi
+
+if [[ ! -d "${PACKAGE_ROOT}" ]]; then
+  echo "pi:stow:mise:install: stow package directory not found: ${PACKAGE_ROOT}" >&2
+  exit 1
+fi
+
+mkdir -p "${MISE_CONFIG_DIR}"
+mkdir -p "${BACKUP_ROOT}/${TIMESTAMP}"
+
+TMP_MANIFEST="$(mktemp)"
+trap 'rm -f "${TMP_MANIFEST}"' EXIT
+
+linked_count=0
+already_linked_count=0
+backed_up_count=0
+
+while IFS= read -r -d '' src; do
+  rel="${src#"${PACKAGE_ROOT}/"}"
+  dest="${TARGET_ROOT}/${rel}"
+
+  if [[ -L "${dest}" && "${dest}" -ef "${src}" ]]; then
+    already_linked_count=$((already_linked_count + 1))
+    printf '%s\n' "${rel}" >> "${TMP_MANIFEST}"
+    continue
+  fi
+
+  if [[ -e "${dest}" || -L "${dest}" ]]; then
+    backup_path="${BACKUP_ROOT}/${TIMESTAMP}/${rel}"
+    mkdir -p "$(dirname "${backup_path}")"
+    mv "${dest}" "${backup_path}"
+    backed_up_count=$((backed_up_count + 1))
+  fi
+
+  linked_count=$((linked_count + 1))
+  printf '%s\n' "${rel}" >> "${TMP_MANIFEST}"
+done < <(find "${PACKAGE_ROOT}" \( -type f -o -type l \) -print0 | sort -z)
+
+stow --dir "${STOW_ROOT}" --target "${TARGET_ROOT}" --restow --no-folding "${PACKAGE_NAME}"
+
+{
+  printf 'timestamp=%s\n' "${TIMESTAMP}"
+  cat "${TMP_MANIFEST}"
+} > "${MANIFEST_PATH}"
+
+cat <<EOF
+pi:stow:mise:install completed
+  linked: ${linked_count}
+  already linked: ${already_linked_count}
+  backed up: ${backed_up_count}
+  manifest: ${MANIFEST_PATH}
+  backups: ${BACKUP_ROOT}/${TIMESTAMP}
+EOF

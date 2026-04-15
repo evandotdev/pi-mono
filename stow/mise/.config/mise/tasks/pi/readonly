@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Run pi in read-only Docker sandbox mode (global wrapper)"
+#MISE raw=true
+#MISE dir="{{cwd}}"
+set -euo pipefail
+
+PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"
+PI_SCRIPT="${PI_MONO_ROOT}/scripts/pi-sandbox.sh"
+
+if [[ ! -x "${PI_SCRIPT}" ]]; then
+  echo "mise task pi:readonly: missing executable ${PI_SCRIPT}" >&2
+  echo "Set PI_MONO_ROOT to your pi-mono checkout path." >&2
+  exit 1
+fi
+
+PI_SANDBOX_LAUNCH_MODE=readonly exec "${PI_SCRIPT}" "$@"
