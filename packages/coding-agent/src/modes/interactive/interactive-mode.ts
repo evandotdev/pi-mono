@@ -2260,7 +2260,7 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/name" || text.startsWith("/name ")) {
+			if (this.isSessionNameCommand(text)) {
 				this.handleNameCommand(text);
 				this.editor.setText("");
 				return;
@@ -2300,7 +2300,7 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/new") {
+			if (text === "/session:new" || text === "/new") {
 				this.editor.setText("");
 				await this.handleClearCommand();
 				return;
@@ -2346,7 +2346,7 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/resume") {
+			if (text === "/session:resume" || text === "/resume") {
 				this.showSessionSelector();
 				this.editor.setText("");
 				return;
@@ -4679,15 +4679,26 @@ export class InteractiveMode {
 		}
 	}
 
+	private isSessionNameCommand(text: string): boolean {
+		return (
+			text === "/session:name" ||
+			text.startsWith("/session:name ") ||
+			text === "/session:rename" ||
+			text.startsWith("/session:rename ") ||
+			text === "/name" ||
+			text.startsWith("/name ")
+		);
+	}
+
 	private handleNameCommand(text: string): void {
-		const name = text.replace(/^\/name\s*/, "").trim();
+		const name = text.replace(/^\/(?:name|session:(?:name|rename))\s*/, "").trim();
 		if (!name) {
 			const currentName = this.sessionManager.getSessionName();
 			if (currentName) {
 				this.chatContainer.addChild(new Spacer(1));
 				this.chatContainer.addChild(new Text(theme.fg("dim", `Session name: ${currentName}`), 1, 0));
 			} else {
-				this.showWarning("Usage: /name <name>");
+				this.showWarning("Usage: /session:name <name> (aliases: /session:rename <name>, /name <name>)");
 			}
 			this.ui.requestRender();
 			return;

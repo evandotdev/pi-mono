@@ -109,12 +109,23 @@ export class FooterComponent implements Component {
 			}
 		}
 
-		// Calculate context usage from session (handles compaction correctly).
-		// After compaction, tokens are unknown until the next LLM response.
+		// Calculate context usage from session.
+		// Right after compaction, measured usage can be unknown until the next assistant response;
+		// in that case, fall back to estimated usage for display.
 		const contextUsage = this.session.getContextUsage();
-		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
-		const contextPercentValue = contextUsage?.percent ?? 0;
-		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
+		let contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
+		let contextPercentValue: number | null = contextUsage?.percent ?? null;
+		let usingEstimatedFallback = false;
+		if (contextPercentValue === null) {
+			const breakdown = this.session.getContextSourceBreakdown();
+			if (breakdown && breakdown.estimatedPercent !== null) {
+				contextPercentValue = breakdown.estimatedPercent;
+				contextWindow = breakdown.contextWindow;
+				usingEstimatedFallback = true;
+			}
+		}
+		const contextPercent = contextPercentValue !== null ? contextPercentValue.toFixed(1) : "?";
+		const numericContextPercent = contextPercentValue ?? 0;
 
 		// Replace home directory with ~
 		let pwd = this.session.sessionManager.getCwd();
@@ -173,16 +184,16 @@ export class FooterComponent implements Component {
 		const contextPercentDisplay =
 			contextPercent === "?"
 				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
+				: `${usingEstimatedFallback ? "~" : ""}${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
 		if (contextPercent === "?") {
 			contextPercentStr = contextPercentDisplay;
-		} else if (contextPercentValue > 90) {
+		} else if (numericContextPercent > 90) {
 			contextPercentStr = theme.fg("error", contextPercentDisplay);
-		} else if (contextPercentValue > 70) {
+		} else if (numericContextPercent > 70) {
 			contextPercentStr = theme.fg("warning", contextPercentDisplay);
-		} else if (contextPercentValue > 50) {
+		} else if (numericContextPercent > 50) {
 			contextPercentStr = contextPercentDisplay;
-		} else if (contextPercentValue > 30) {
+		} else if (numericContextPercent > 30) {
 			const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
 			contextPercentStr = `${lightYellow}${contextPercentDisplay}\x1b[39m`;
 		} else {
