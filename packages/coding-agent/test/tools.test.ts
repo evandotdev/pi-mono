@@ -1,14 +1,16 @@
+import { spawnSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBash } from "../src/core/bash-executor.js";
+import { createAstGrepTool } from "../src/core/tools/ast-grep.js";
 import { bashTool, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.js";
 import { editTool } from "../src/core/tools/edit.js";
 import { findTool } from "../src/core/tools/find.js";
 import { grepTool } from "../src/core/tools/grep.js";
+import { readOnlyTools, readTool } from "../src/core/tools/index.js";
 import { lsTool } from "../src/core/tools/ls.js";
-import { readTool } from "../src/core/tools/read.js";
 import { writeTool } from "../src/core/tools/write.js";
 import * as shellModule from "../src/utils/shell.js";
 
@@ -519,6 +521,43 @@ describe("Coding Agent Tools", () => {
 			expect(output).toContain("[1 matches limit reached. Use limit=2 for more, or refine pattern]");
 			// Ensure second match is not present
 			expect(output).not.toContain("match two");
+		});
+	});
+
+	describe("ast-grep tool", () => {
+		it("should be included in the read-only tool set", () => {
+			expect(readOnlyTools.map((tool) => tool.name)).toContain("ast-grep");
+		});
+
+		it("should search code structurally when ast-grep is available", async () => {
+			const astGrepAvailable = spawnSync("ast-grep", ["--version"], { stdio: "pipe" }).error === undefined;
+			if (!astGrepAvailable) {
+				return;
+			}
+
+			const testFile = join(testDir, "example.ts");
+			writeFileSync(
+				testFile,
+				[
+					"function greet(name: string) {",
+					String.raw`\treturn \`Hello \${name}\`;`,
+					"}",
+					"",
+					"const answer = 42;",
+				].join("\n"),
+			);
+
+			const astGrepTool = createAstGrepTool(testDir);
+			const result = await astGrepTool.execute("test-call-ast-grep-1", {
+				pattern: "function $NAME($$$ARGS) { $$$BODY }",
+				language: "typescript",
+				path: testDir,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("example.ts:1:");
+			expect(output).toContain("function greet(name: string) {");
+			expect(output).toContain(String.raw`return \`Hello \${name}\`;`);
 		});
 	});
 

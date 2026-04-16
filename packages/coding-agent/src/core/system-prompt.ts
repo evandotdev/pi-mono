@@ -102,13 +102,14 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
+	const hasAstGrep = tools.includes("ast-grep");
 	const hasRead = tools.includes("read");
 
 	// File exploration guidelines
-	if (hasBash && !hasGrep && !hasFind && !hasLs) {
+	if (hasBash && !hasGrep && !hasFind && !hasLs && !hasAstGrep) {
 		addGuideline("Use bash for file operations like ls, rg, find");
-	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
-		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+	} else if (hasBash && (hasGrep || hasFind || hasLs || hasAstGrep)) {
+		addGuideline("Prefer ast-grep/grep/find/ls tools over bash for file exploration");
 	}
 
 	for (const guideline of promptGuidelines ?? []) {

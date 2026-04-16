@@ -447,9 +447,9 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 ```typescript
 import {
   codingTools,   // read, bash, edit, write (default)
-  readOnlyTools, // read, grep, find, ls
+  readOnlyTools, // read, grep, find, ls, ast-grep
   readTool, bashTool, editTool, writeTool,
-  grepTool, findTool, lsTool,
+  grepTool, findTool, lsTool, astGrepTool,
 } from "@mariozechner/pi-coding-agent";
 
 // Use built-in tool set
@@ -470,7 +470,7 @@ const { session } = await createAgentSession({
 ```typescript
 import {
   createCodingTools,    // Creates [read, bash, edit, write] for specific cwd
-  createReadOnlyTools,  // Creates [read, grep, find, ls] for specific cwd
+  createReadOnlyTools,  // Creates [read, grep, find, ls, ast-grep] for specific cwd
   createReadTool,
   createBashTool,
   createEditTool,
@@ -478,6 +478,7 @@ import {
   createGrepTool,
   createFindTool,
   createLsTool,
+  createAstGrepTool,
 } from "@mariozechner/pi-coding-agent";
 
 const cwd = "/path/to/project";

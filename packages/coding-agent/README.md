@@ -523,7 +523,7 @@ cat README.md | pi -p "Summarize this text"
 | `--tools <list>` | Enable specific built-in tools (default: `read,bash,edit,write`) |
 | `--no-tools` | Disable all built-in tools (extension tools still work) |
 
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
+Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `ast-grep`
 
 ### Resource Options
 
@@ -585,7 +585,7 @@ pi --model sonnet:high "Solve this complex problem"
 pi --models "claude-*,gpt-4o"
 
 # Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
+pi --tools read,grep,find,ls,ast-grep -p "Review the code"
 
 # High thinking level
 pi --thinking high "Solve this complex problem"

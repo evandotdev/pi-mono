@@ -5,7 +5,7 @@ import { getModel } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DefaultResourceLoader } from "../src/core/resource-loader.js";
-import { createAgentSession } from "../src/core/sdk.js";
+import { createAgentSession, readOnlyTools } from "../src/core/sdk.js";
 import { SessionManager } from "../src/core/session-manager.js";
 import { SettingsManager } from "../src/core/settings-manager.js";
 
@@ -87,6 +87,36 @@ describe("AgentSession dynamic tool registration", () => {
 		expect(session.getActiveToolNames()).toContain("dynamic_tool");
 		expect(session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
 		expect(session.systemPrompt).toContain("- Use dynamic_tool when the user asks for dynamic behavior tests.");
+
+		session.dispose();
+	});
+
+	it("keeps built-in ast-grep active in the read-only tool set and includes it in the prompt", async () => {
+		const settingsManager = SettingsManager.create(tempDir, agentDir);
+		const sessionManager = SessionManager.inMemory();
+		const resourceLoader = new DefaultResourceLoader({
+			cwd: tempDir,
+			agentDir,
+			settingsManager,
+		});
+		await resourceLoader.reload();
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir,
+			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			settingsManager,
+			sessionManager,
+			resourceLoader,
+			tools: readOnlyTools,
+		});
+
+		expect(session.getActiveToolNames()).toContain("ast-grep");
+		expect(session.getAllTools().map((tool) => tool.name)).toContain("ast-grep");
+		expect(session.systemPrompt).toContain("- ast-grep: Search code structurally with AST patterns");
+		expect(session.systemPrompt).toContain(
+			"- Use ast-grep for syntax-aware code search when plain-text search would be brittle.",
+		);
 
 		session.dispose();
 	});

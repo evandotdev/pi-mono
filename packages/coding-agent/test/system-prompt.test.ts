@@ -91,5 +91,15 @@ describe("buildSystemPrompt", () => {
 
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
+
+		test("prefers ast-grep alongside other exploration tools over bash", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["bash", "ast-grep"],
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).toContain("- Prefer ast-grep/grep/find/ls tools over bash for file exploration");
+		});
 	});
 });

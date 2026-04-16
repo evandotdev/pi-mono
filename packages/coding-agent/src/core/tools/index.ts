@@ -1,4 +1,13 @@
 export {
+	type AstGrepToolDetails,
+	type AstGrepToolInput,
+	type AstGrepToolOptions,
+	astGrepTool,
+	astGrepToolDefinition,
+	createAstGrepTool,
+	createAstGrepToolDefinition,
+} from "./ast-grep.js";
+export {
 	type BashOperations,
 	type BashSpawnContext,
 	type BashSpawnHook,
@@ -84,6 +93,7 @@ export {
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.js";
+import { astGrepTool, astGrepToolDefinition, createAstGrepTool, createAstGrepToolDefinition } from "./ast-grep.js";
 import {
 	type BashToolOptions,
 	bashTool,
@@ -108,7 +118,7 @@ export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 
 export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool];
-export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
+export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool, astGrepTool];
 
 export const allTools = {
 	read: readTool,
@@ -118,6 +128,7 @@ export const allTools = {
 	grep: grepTool,
 	find: findTool,
 	ls: lsTool,
+	"ast-grep": astGrepTool,
 };
 
 export const allToolDefinitions = {
@@ -128,6 +139,7 @@ export const allToolDefinitions = {
 	grep: grepToolDefinition,
 	find: findToolDefinition,
 	ls: lsToolDefinition,
+	"ast-grep": astGrepToolDefinition,
 };
 
 export type ToolName = keyof typeof allTools;
@@ -152,6 +164,7 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 		createGrepToolDefinition(cwd),
 		createFindToolDefinition(cwd),
 		createLsToolDefinition(cwd),
+		createAstGrepToolDefinition(cwd),
 	];
 }
 
@@ -164,6 +177,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		grep: createGrepToolDefinition(cwd),
 		find: createFindToolDefinition(cwd),
 		ls: createLsToolDefinition(cwd),
+		"ast-grep": createAstGrepToolDefinition(cwd),
 	};
 }
 
@@ -177,7 +191,13 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 }
 
 export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [createReadTool(cwd, options?.read), createGrepTool(cwd), createFindTool(cwd), createLsTool(cwd)];
+	return [
+		createReadTool(cwd, options?.read),
+		createGrepTool(cwd),
+		createFindTool(cwd),
+		createLsTool(cwd),
+		createAstGrepTool(cwd),
+	];
 }
 
 export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
@@ -189,5 +209,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		grep: createGrepTool(cwd),
 		find: createFindTool(cwd),
 		ls: createLsTool(cwd),
+		"ast-grep": createAstGrepTool(cwd),
 	};
 }

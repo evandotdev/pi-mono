@@ -184,6 +184,7 @@ export {
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
+	createAstGrepTool,
 	createBashTool,
 	// Tool factories (for custom cwd)
 	createCodingTools,
@@ -241,6 +242,11 @@ export {
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Tools
 export {
+	type AstGrepToolDetails,
+	type AstGrepToolInput,
+	type AstGrepToolOptions,
+	astGrepTool,
+	astGrepToolDefinition,
 	type BashOperations,
 	type BashSpawnContext,
 	type BashSpawnHook,
@@ -250,6 +256,7 @@ export {
 	bashTool,
 	bashToolDefinition,
 	codingTools,
+	createAstGrepToolDefinition,
 	createBashToolDefinition,
 	createEditToolDefinition,
 	createFindToolDefinition,

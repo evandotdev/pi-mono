@@ -16,8 +16,10 @@ import { SettingsManager } from "./settings-manager.js";
 import { time } from "./timings.js";
 import {
 	allTools,
+	astGrepTool,
 	bashTool,
 	codingTools,
+	createAstGrepTool,
 	createBashTool,
 	createCodingTools,
 	createEditTool,
@@ -109,6 +111,7 @@ export {
 	grepTool,
 	findTool,
 	lsTool,
+	astGrepTool,
 	codingTools,
 	readOnlyTools,
 	allTools as allBuiltInTools,
@@ -123,6 +126,7 @@ export {
 	createGrepTool,
 	createFindTool,
 	createLsTool,
+	createAstGrepTool,
 };
 
 // Helper Functions
