@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,10 +9,12 @@ import { isDefaultSandboxImage, resolveSandboxImage } from "./pi-sandbox-image-t
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, "..");
+const repoRoot = realpathSync(path.resolve(__dirname, ".."));
 const cwd = process.cwd();
 
 const SANDBOX_MODE = normalizeSandboxMode(process.env.PI_SANDBOX_LAUNCH_MODE);
+const EXTRA_FOLDERS_ENV = "PI_SANDBOX_EXTRA_FOLDERS";
+const EXTRA_FOLDERS_BASE_CWD_ENV = "PI_SANDBOX_EXTRA_FOLDERS_CWD";
 
 const FORWARDED_ENV_VARS = [
 	"PI_SKIP_VERSION_CHECK",
@@ -37,6 +39,24 @@ const FORWARDED_ENV_VARS = [
 	"MINIMAX_CN_API_KEY",
 ];
 
+const HOST_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+
+function expandHomeDir(value) {
+	if (value === "~") return os.homedir();
+	if (typeof value === "string" && value.startsWith("~/")) {
+		return path.join(os.homedir(), value.slice(2));
+	}
+	return value;
+}
+
+function getDefaultAgentDir() {
+	const envDir = process.env[HOST_AGENT_DIR_ENV];
+	if (typeof envDir === "string" && envDir.trim().length > 0) {
+		return expandHomeDir(envDir.trim());
+	}
+	return path.join(os.homedir(), ".pi", "agent");
+}
+
 const DEFAULT_CONFIG = {
 	enabled: true,
 	image: "pi-sandbox:latest",
@@ -45,7 +65,7 @@ const DEFAULT_CONFIG = {
 	pullOnStart: false,
 	runArgs: ["--cap-drop=ALL", "--security-opt=no-new-privileges", "--ipc=none"],
 	passEnv: true,
-	agentDir: path.join(os.homedir(), ".pi", "agent"),
+	agentDir: getDefaultAgentDir(),
 	gitconfig: "host",
 };
 
@@ -54,6 +74,7 @@ const NETWORK_MODES = new Set(["none", "bridge", "host"]);
 const CONTAINER_HOME = "/home/pisandbox";
 const CONTAINER_AGENT_DIR = `${CONTAINER_HOME}/.pi/agent`;
 const CONTAINER_AGENTS_SKILLS_DIR = `${CONTAINER_HOME}/.agents/skills`;
+const CONTAINER_REPO_ROOT = "/opt/pi-mono";
 
 function normalizeSandboxMode(value) {
 	if (!value) return "pi";
@@ -66,6 +87,28 @@ function parseEnvBoolean(value) {
 	if (!value) return false;
 	const normalized = value.trim().toLowerCase();
 	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function parseFoldersEnv(value) {
+	if (!value) return [];
+
+	let parsed;
+	try {
+		parsed = JSON.parse(value);
+	} catch {
+		fail(`invalid ${EXTRA_FOLDERS_ENV}; expected a JSON array of folder paths`);
+	}
+
+	if (!Array.isArray(parsed)) {
+		fail(`invalid ${EXTRA_FOLDERS_ENV}; expected a JSON array of folder paths`);
+	}
+
+	const folders = parsed.filter((item) => typeof item === "string" && item.trim().length > 0);
+	if (folders.length !== parsed.length) {
+		fail(`invalid ${EXTRA_FOLDERS_ENV}; expected a JSON array of non-empty folder paths`);
+	}
+
+	return folders;
 }
 
 function fail(message) {
@@ -146,11 +189,12 @@ function resolveConfigPath(configValue, baseDir) {
 }
 
 function resolveConfig() {
-	const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "extensions", "docker-sandbox.json");
+	const defaultAgentDir = getDefaultAgentDir();
+	const globalConfigPath = path.join(defaultAgentDir, "extensions", "docker-sandbox.json");
 	const hostCwd = realpathSync(cwd);
 	const projectRoot = findNearestPiRoot(hostCwd);
 	const projectConfigPath = projectRoot ? path.join(projectRoot, ".pi", "docker-sandbox.json") : undefined;
-	let config = { ...DEFAULT_CONFIG };
+	let config = { ...DEFAULT_CONFIG, agentDir: defaultAgentDir };
 	config = mergeConfig(config, readConfigFile(globalConfigPath));
 	if (projectConfigPath) {
 		config = mergeConfig(config, readConfigFile(projectConfigPath));
@@ -181,11 +225,11 @@ function resolveConfig() {
 	};
 }
 
-function resolveFolderPath(folder) {
+function resolveFolderPath(folder, baseDir = cwd) {
 	let candidate = folder;
 	if (candidate === "~") candidate = os.homedir();
 	if (candidate.startsWith("~/")) candidate = path.join(os.homedir(), candidate.slice(2));
-	const absolute = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(cwd, candidate);
+	const absolute = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(baseDir, candidate);
 	if (!existsSync(absolute)) fail(`sandbox folder does not exist: ${folder} (${absolute})`);
 	const stats = statSync(absolute);
 	if (!stats.isDirectory()) fail(`sandbox folder is not a directory: ${folder} (${absolute})`);
@@ -218,7 +262,7 @@ function findNearestPiRoot(startDir) {
 	}
 }
 
-function resolveFolders(config) {
+function resolveFolders(config, extraFolders = [], extraFoldersBaseDir = cwd) {
 	const seen = new Set();
 	const folders = [];
 	const addFolder = (folderPath) => {
@@ -229,6 +273,10 @@ function resolveFolders(config) {
 
 	for (const folder of config.folders) {
 		addFolder(resolveFolderPath(folder));
+	}
+
+	for (const folder of extraFolders) {
+		addFolder(resolveFolderPath(folder, extraFoldersBaseDir));
 	}
 
 	const hostCwd = realpathSync(cwd);
@@ -248,6 +296,13 @@ function sanitizeFolderName(name) {
 function buildMounts(folders) {
 	const usedNames = new Set();
 	return folders.map((hostPath) => {
+		if (hostPath === repoRoot) {
+			return {
+				hostPath,
+				containerPath: CONTAINER_REPO_ROOT,
+			};
+		}
+
 		const base = path.basename(hostPath);
 		const seed = sanitizeFolderName(base === path.sep || base === "" ? "root" : base);
 		let folderName = seed;
@@ -262,6 +317,71 @@ function buildMounts(folders) {
 			containerPath: `/home/pisandbox/${folderName}`,
 		};
 	});
+}
+
+function expandWorkspacePattern(workspacePattern) {
+	const segments = workspacePattern.split("/");
+	const results = [""];
+
+	for (const segment of segments) {
+		if (segment === "*") {
+			const next = [];
+			for (const current of results) {
+				const directory = current ? path.join(repoRoot, current) : repoRoot;
+				if (!existsSync(directory) || !statSync(directory).isDirectory()) continue;
+				for (const entry of readdirSync(directory, { withFileTypes: true })) {
+					if (!entry.isDirectory()) continue;
+					next.push(current ? path.join(current, entry.name) : entry.name);
+				}
+			}
+			results.splice(0, results.length, ...next);
+			continue;
+		}
+
+		for (let index = 0; index < results.length; index += 1) {
+			results[index] = results[index] ? path.join(results[index], segment) : segment;
+		}
+	}
+
+	return results;
+}
+
+function getRepoWorkspacePaths() {
+	const packageJsonPath = path.join(repoRoot, "package.json");
+	if (!existsSync(packageJsonPath)) return [];
+
+	let packageJson;
+	try {
+		packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+	} catch {
+		return [];
+	}
+
+	if (!packageJson || typeof packageJson !== "object" || !Array.isArray(packageJson.workspaces)) {
+		return [];
+	}
+
+	const workspacePaths = new Set();
+	for (const workspace of packageJson.workspaces) {
+		if (typeof workspace !== "string" || workspace.trim().length === 0) continue;
+		for (const relativePath of expandWorkspacePattern(workspace)) {
+			const absolutePath = path.join(repoRoot, relativePath);
+			if (!existsSync(absolutePath) || !statSync(absolutePath).isDirectory()) continue;
+			workspacePaths.add(relativePath);
+		}
+	}
+
+	return [...workspacePaths].sort();
+}
+
+function addRepoNodeModulesVolumes(dockerArgs, mounts) {
+	const repoMount = mounts.find((mount) => mount.hostPath === repoRoot);
+	if (!repoMount) return;
+
+	dockerArgs.push("--volume", `${repoMount.containerPath}/node_modules`);
+	for (const workspacePath of getRepoWorkspacePaths()) {
+		dockerArgs.push("--volume", `${repoMount.containerPath}/${toPosixPath(workspacePath)}/node_modules`);
+	}
 }
 
 function resolveContainerCwd(hostCwd, mounts) {
@@ -328,6 +448,7 @@ function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCw
 	for (const mount of mounts) {
 		dockerArgs.push("--volume", `${mount.hostPath}:${mount.containerPath}${readonly ? ":ro" : ""}`);
 	}
+	addRepoNodeModulesVolumes(dockerArgs, mounts);
 
 	const agentDir = path.resolve(config.agentDir);
 	mkdirSync(agentDir, { recursive: true });
@@ -419,7 +540,11 @@ function main() {
 	}
 
 	const image = resolveSandboxImage(config.image, repoRoot);
-	const folders = resolveFolders(config);
+	const folders = resolveFolders(
+		config,
+		parseFoldersEnv(process.env[EXTRA_FOLDERS_ENV]),
+		process.env[EXTRA_FOLDERS_BASE_CWD_ENV] ?? cwd,
+	);
 	const mounts = buildMounts(folders);
 	const hostCwd = realpathSync(cwd);
 	const containerCwd = resolveContainerCwd(hostCwd, mounts);
