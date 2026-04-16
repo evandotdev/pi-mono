@@ -33,6 +33,9 @@ const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const REDIRECT_URI = "http://localhost:1455/auth/callback";
 const SCOPE = "openid profile email offline_access";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
+const OPENAI_CODEX_USAGE_URL = "https://chatgpt.com/backend-api/codex/usage";
+const OPENAI_CODEX_USAGE_USER_AGENT =
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
 
 type TokenSuccess = { type: "success"; access: string; refresh: string; expires: number };
 type TokenFailure = { type: "failed" };
@@ -50,6 +53,37 @@ function createState(): string {
 		throw new Error("OpenAI Codex OAuth is only available in Node.js environments");
 	}
 	return _randomBytes(16).toString("hex");
+}
+
+function getOpenAICodexUsageHeaders(accessToken: string, accountId: string): Record<string, string> {
+	return {
+		Accept: "application/json",
+		"Accept-Language": "en-US,en;q=0.9",
+		Authorization: `Bearer ${accessToken}`,
+		"Cache-Control": "no-cache",
+		"chatgpt-account-id": accountId,
+		Origin: "https://chatgpt.com",
+		Pragma: "no-cache",
+		Priority: "u=1, i",
+		Referer: "https://chatgpt.com/",
+		"Sec-CH-UA": '"Google Chrome";v="135", "Chromium";v="135", "Not.A/Brand";v="24"',
+		"Sec-CH-UA-Mobile": "?0",
+		"Sec-CH-UA-Platform": '"macOS"',
+		"Sec-Fetch-Dest": "empty",
+		"Sec-Fetch-Mode": "cors",
+		"Sec-Fetch-Site": "same-origin",
+		"User-Agent": OPENAI_CODEX_USAGE_USER_AGENT,
+	};
+}
+
+function getOpenAICodexUsageError(response: Response): string {
+	if (response.headers.get("cf-mitigated") === "challenge") {
+		return `${response.status} Cloudflare challenge`;
+	}
+	if (response.statusText) {
+		return `${response.status} ${response.statusText}`;
+	}
+	return `HTTP ${response.status}`;
 }
 
 function parseAuthorizationInput(input: string): { code?: string; state?: string } {
@@ -459,20 +493,13 @@ export const openaiCodexOAuthProvider: OAuthProviderInterface = {
 			const accountId = typeof credentials.accountId === "string" ? credentials.accountId : undefined;
 			if (!accountId) return null;
 
-			const userAgent =
-				typeof process !== "undefined" && process.platform && process.arch
-					? `pi (${process.platform} ${process.arch})`
-					: "pi (browser)";
-			const response = await fetch("https://chatgpt.com/backend-api/codex/usage", {
-				headers: {
-					Accept: "application/json",
-					Authorization: `Bearer ${credentials.access}`,
-					"chatgpt-account-id": accountId,
-					"User-Agent": userAgent,
-				},
+			const response = await fetch(OPENAI_CODEX_USAGE_URL, {
+				headers: getOpenAICodexUsageHeaders(credentials.access, accountId),
 				signal: AbortSignal.timeout(5000),
 			});
-			if (!response.ok) return null;
+			if (!response.ok) {
+				throw new Error(getOpenAICodexUsageError(response));
+			}
 
 			type RateLimitWindow = {
 				used_percent?: number;
@@ -531,7 +558,8 @@ export const openaiCodexOAuthProvider: OAuthProviderInterface = {
 			}
 
 			return Object.keys(windows).length > 0 ? { windows } : null;
-		} catch {
+		} catch (error) {
+			if (error instanceof Error) throw error;
 			return null;
 		}
 	},
