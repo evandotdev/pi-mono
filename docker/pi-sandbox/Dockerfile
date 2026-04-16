@@ -20,7 +20,9 @@ COPY packages/agent ./packages/agent
 COPY packages/tui ./packages/tui
 COPY packages/coding-agent ./packages/coding-agent
 
-RUN npm ci --ignore-scripts
+# npm ci can miss tsgo's platform package on linux/arm64, so install it explicitly.
+RUN npm ci --ignore-scripts \
+	&& npm install --no-save --package-lock=false --ignore-scripts "@typescript/native-preview-linux-$(node -p 'process.arch')"
 
 RUN npm --workspace packages/tui run build \
 	&& npm --workspace packages/ai run build \

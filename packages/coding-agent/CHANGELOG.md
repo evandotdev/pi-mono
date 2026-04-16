@@ -43,6 +43,7 @@
 
 ### Fixed
 
+- Fixed Docker sandbox image builds on Linux arm64 by explicitly installing the matching `@typescript/native-preview` platform package before workspace builds.
 - Fixed `pi:stow:mise:install` to also manage a global sandbox gitconfig override so `mise run pi` works from other repositories without requiring a host `~/.gitconfig`.
 - Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
 - Fixed `pi:yolo` mistakenly treating wrapper-style extra-directory flags as pi CLI flags by reserving `-d/--directory` for sandbox wrapper mounts and rejecting those flags in the direct-source wrapper.
