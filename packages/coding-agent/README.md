@@ -158,7 +158,7 @@ Standard editing keybindings for delete word, undo, etc. See [docs/keybindings.m
 
 ### Commands
 
-Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are available as `/skill:name`, and [prompt templates](#prompt-templates) expand via `/templatename`.
+Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are available as `/skill:name`, and [prompt templates](#prompt-templates) expand via either `/templatename` or `/prompt:templatename`.
 
 | Command | Description |
 |---------|-------------|
@@ -184,6 +184,8 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit` | Quit pi |
+
+Prompt templates support both forms: `/<template>` and `/prompt:<template>`.
 
 ### Keyboard Shortcuts
 
@@ -606,6 +608,8 @@ pi --thinking high "Solve this complex problem"
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for guidelines and [docs/development.md](docs/development.md) for setup, forking, and debugging.
 
+### Unreleased (fork)
+
 For the `pi-mono` fork workflow, run pi from source with monorepo mise tasks:
 
 ```bash
@@ -619,7 +623,12 @@ To install those `pi:*` tasks globally via stow (so `mise run pi` works from any
 
 ```bash
 mise run pi:stow:mise:install
+mise run pi:stow:mise:uninstall
 ```
+
+Global wrappers default to `~/pi-mono`. If your checkout lives elsewhere, set `PI_MONO_ROOT`.
+
+In this fork, the bundled sandbox extension also adds `/sandbox` to show sandbox status and mount verification details.
 
 ---
 

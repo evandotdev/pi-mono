@@ -53,6 +53,19 @@ I regularly publish my own `pi-mono` work sessions here:
 
 ## Fork Updates
 
+### Unreleased
+
+- Docker sandbox workflow for fork development:
+  - monorepo `mise` tasks (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`)
+  - `/sandbox` status + verification command from the bundled sandbox extension
+  - local sandbox image build/tag scripts under `scripts/pi-sandbox*`
+- Slash command grouping updates:
+  - session commands now support namespaced forms (`/session:new`, `/session:resume`, `/session:name`, `/session:rename`) with short aliases retained (`/new`, `/resume`, `/name`)
+  - prompt templates support namespaced invocation via `/prompt:<template>` in addition to `/<template>`
+- Stow automation for machine setup:
+  - `pi:stow:install` / `pi:stow:uninstall` for linking repo `.pi` resources into `~/.pi`
+  - `pi:stow:mise:install` / `pi:stow:mise:uninstall` for global `mise` task wrappers under `~/.config/mise`
+
 ### Custom Extensions
 
 - [grep-home-shorten.ts](.pi/extensions/grep-home-shorten.ts) truncates your `$HOME` variable into `~` to save tokens

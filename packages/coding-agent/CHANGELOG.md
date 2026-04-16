@@ -7,6 +7,9 @@
 - Interactive OAuth usage dashboard for Anthropic, OpenAI Codex, and Antigravity (footer + account selectors, including utilization windows and reset timing).
 - Multi-account OAuth flow and load balancing, including account selection during model switches and retry-time credential rotation on rate-limit/overload failures.
 - New interactive slash command capabilities: `/thinking`, `/context`, `/model list`, and `/generate-models`.
+- Namespaced command groups for sessions and prompts, with canonical forms (`/session:*`, `/prompt:*`) and backward-compatible short aliases.
+- Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command, and local sandbox image tooling.
+- Stow-based machine setup automation for repo `.pi` resources and global `mise` task wrappers.
 
 ### Added
 
@@ -16,12 +19,18 @@
 - Added `/model list` support to print available models in chat.
 - Added `/generate-models` slash command to run pi-ai model generation from interactive mode.
 - Added `/usage` slash command to show OAuth provider usage across all accounts with utilization windows and reset timing.
+- Added grouped session command names `/session:new`, `/session:resume`, `/session:name`, and `/session:rename` while keeping `/new`, `/resume`, and `/name` as aliases.
+- Added `/prompt:<template>` aliases for prompt templates in expansion, slash-command autocomplete, and `/hotkeys` output.
+- Added monorepo `mise` tasks and stow helpers for sandbox launch workflows (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`, and `pi:stow:*`).
+- Added Docker sandbox launcher/config artifacts for fork-local runs, including `.pi/docker-sandbox.json`, `.pi/extensions/sandbox.ts`, and `scripts/pi-sandbox*`.
 
 ### Changed
 
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 - Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
 - Changed footer OAuth usage rendering to show all available usage windows (for example `5h` and `7d`) with clearer utilization colorization.
+- Changed prompt-template command handling to treat `/prompt:<template>` as the namespaced form while preserving `/<template>` compatibility.
+- Changed session command docs and dispatch to prefer namespaced `/session:*` forms while preserving short aliases.
 
 ### Fixed
 
@@ -30,6 +39,7 @@
 - Fixed `session_shutdown` to fire on `SIGHUP` and `SIGTERM` in interactive, print, and RPC modes so extensions can run shutdown cleanup on those signal-driven exits ([#3212](https://github.com/badlogic/pi-mono/issues/3212))
 - Fixed screenshot path parsing to handle lower case am/pm in macOS screenshot filenames ([#3194](https://github.com/badlogic/pi-mono/pull/3194) by [@jay-aye-see-kay](https://github.com/jay-aye-see-kay))
 - Fixed interactive auto-retry status updates to show a live countdown during backoff instead of a static retry delay message ([#3187](https://github.com/badlogic/pi-mono/issues/3187))
+- Fixed footer context usage display immediately after compaction by falling back to estimated usage when exact measured usage is temporarily unavailable.
 
 ## [0.67.2] - 2026-04-14
 
