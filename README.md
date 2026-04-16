@@ -81,7 +81,7 @@ The current bundled set is below; legacy `diff.ts` and `files.ts` are no longer 
 - [guardrails.ts](.pi/extensions/guardrails.ts) blocks risky path and command patterns (for example `sudo` or `rm -rf`) with layered `repo-default`/`project`/`global` config scopes.
 - [prompt-url-widget.ts](.pi/extensions/prompt-url-widget.ts) detects GitHub PR / issue prompts and shows metadata in a widget.
 - [redraws.ts](.pi/extensions/redraws.ts) exposes `/tui` to show TUI redraw stats.
-- [sandbox.ts](.pi/extensions/sandbox.ts) sandboxes bash commands with `@anthropic-ai/sandbox-runtime`.
+- [sandbox.ts](.pi/extensions/sandbox.ts) sandboxes bash commands with `@anthropic-ai/sandbox-runtime`; see [packages/coding-agent/docs/sandboxing.md](packages/coding-agent/docs/sandboxing.md) for the canonical sandbox map and `/sandbox:info`.
 - [tps.ts](.pi/extensions/tps.ts) reports tokens-per-second after each assistant turn.
 - [commit/SKILL.md](.pi/skills/commit/SKILL.md) helps create concise Conventional Commits-style commit messages (`/skill:commit`).
 - [security/SKILL.md](.pi/skills/security/SKILL.md) guides security review and hardening work (`/skill:security`).

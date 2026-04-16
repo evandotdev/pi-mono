@@ -15,6 +15,7 @@
 
 ### Added
 
+- Added sandbox inspection diagnostics with `/sandbox:info` and `/doctor:sandbox`, plus canonical sandboxing docs for Docker and extension setup.
 - Added `plan-mode/` branch-based planning extension with `/plan` workflow and approval/implementation handoff.
 - Added `commit` and `security` skills under `.pi/skills/` for commit formatting and security review/hardening workflows.
 - Added `grep-home-shorten.ts` and `tps.ts` bundled extensions for shorter grep output and tokens-per-second visibility.
