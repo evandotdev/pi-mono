@@ -14,6 +14,16 @@ Create a git commit for the current changes using a concise Conventional Commits
 - `type`: (REQUIRED) Use one of fix, feat, build, chore, ci, docs, style, refactor, perf, test
 - `scope`: (OPTIONAL) e.g. api, docs, ui, you can also run the following command to see existing type and scopes in the current repository:
 
+```bash
+# Try this first
+git log --pretty=format:%s \
+| grep -E '^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([^()]+\))?(!)?: ' \
+| cut -d: -f1 \
+| sort -u
+# If error occurs, use this instead:
+git log -n 50 --pretty=format:%s
+```
+
 - `description`: (REQUIRED) Short, imperative, <= 72 chars, no trailing period.
 
 ## Notes
@@ -47,3 +57,8 @@ git log -n 50 --pretty=format:%s
 4. If there are ambiguous extra files, ask the user for clarification before committing.
 5. Stage only the intended files (all changes if no files specified).
 6. Run `git commit -m "<subject>"` (and `-m "<body>"` if needed).
+
+## Examples
+
+- docs: update readme
+- docs(coding-agent): update readme

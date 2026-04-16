@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveJsonConfig } from "./lib/config.ts";
+import parseShellCommand from "shell-quote/parse.js";
 
 interface PathRule {
 	pattern: string;
@@ -48,6 +49,148 @@ interface CompiledPermissionRule {
 	regex: RegExp;
 	tools: Set<string> | null;
 	targets: Set<PermissionTarget> | null;
+}
+
+interface ShellQuoteOperatorToken {
+	op: string;
+}
+
+interface ShellQuoteCommentToken {
+	comment: string;
+}
+
+type ShellQuoteToken = string | ShellQuoteOperatorToken | ShellQuoteCommentToken;
+
+const SHELL_COMMAND_SEPARATORS = new Set(["&&", "||", ";;", "|&", ";", "|", "&"]);
+const SHELL_WRAPPER_COMMANDS = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"]);
+
+function isShellQuoteOperatorToken(value: unknown): value is ShellQuoteOperatorToken {
+	return isRecord(value) && typeof value.op === "string";
+}
+
+function isShellQuoteCommentToken(value: unknown): value is ShellQuoteCommentToken {
+	return isRecord(value) && typeof value.comment === "string";
+}
+
+function parseShellCommandTokens(command: string): ShellQuoteToken[] {
+	try {
+		return parseShellCommand(command) as ShellQuoteToken[];
+	} catch {
+		return [];
+	}
+}
+
+function isEnvironmentAssignment(value: string): boolean {
+	return /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(value);
+}
+
+function splitShellCommandSegments(tokens: ShellQuoteToken[]): string[][] {
+	const segments: string[][] = [];
+	let current: string[] = [];
+
+	for (const token of tokens) {
+		if (typeof token === "string") {
+			if (token.length > 0) current.push(token);
+			continue;
+		}
+
+		if (isShellQuoteCommentToken(token)) {
+			break;
+		}
+
+		if (isShellQuoteOperatorToken(token) && SHELL_COMMAND_SEPARATORS.has(token.op)) {
+			if (current.length > 0) segments.push(current);
+			current = [];
+		}
+	}
+
+	if (current.length > 0) {
+		segments.push(current);
+	}
+
+	return segments;
+}
+
+function stripEnvPrefix(tokens: string[]): string[] {
+	let index = 0;
+
+	while (index < tokens.length) {
+		const token = tokens[index];
+		if (token === "--") {
+			index++;
+			break;
+		}
+		if (isEnvironmentAssignment(token)) {
+			index++;
+			continue;
+		}
+		if (token === "-u" && index + 1 < tokens.length) {
+			index += 2;
+			continue;
+		}
+		if (token.startsWith("-")) {
+			index++;
+			continue;
+		}
+		break;
+	}
+
+	return tokens.slice(index);
+}
+
+function getNestedShellCommand(segment: string[]): string | undefined {
+	for (let index = 1; index < segment.length; index++) {
+		const token = segment[index];
+		if (!token.startsWith("-")) continue;
+		if (!token.includes("c")) continue;
+		return segment[index + 1];
+	}
+
+	return undefined;
+}
+
+function containsActualCommand(command: string, targetCommand: string): boolean {
+	const normalizedTarget = targetCommand.trim().toLowerCase();
+	if (normalizedTarget === "") return false;
+
+	const visitTokens = (tokens: ShellQuoteToken[]): boolean => {
+		for (const segment of splitShellCommandSegments(tokens)) {
+			if (containsActualCommandInSegment(segment)) return true;
+		}
+
+		return false;
+	};
+
+	const containsActualCommandInSegment = (segment: string[]): boolean => {
+		if (segment.length === 0) return false;
+
+		const head = segment[0].toLowerCase();
+		if (head === normalizedTarget) return true;
+
+		if (head === "env") {
+			const envRemainder = stripEnvPrefix(segment.slice(1));
+			if (envRemainder.length > 0 && containsActualCommandInSegment(envRemainder)) return true;
+		}
+
+		if (SHELL_WRAPPER_COMMANDS.has(head)) {
+			const nestedCommand = getNestedShellCommand(segment);
+			if (nestedCommand !== undefined) {
+				const nestedTokens = parseShellCommandTokens(nestedCommand);
+				if (nestedTokens.length > 0 && visitTokens(nestedTokens)) return true;
+			}
+		}
+
+		return false;
+	};
+
+	const parsed = parseShellCommandTokens(command);
+	if (parsed.length > 0 && visitTokens(parsed)) return true;
+
+	if (normalizedTarget === "sudo") {
+		return /^\s*sudo(?:\s|$)/i.test(command);
+	}
+
+	return false;
 }
 
 const DEFAULT_CONFIG: GuardrailsConfig = {
@@ -232,6 +375,15 @@ const DEFAULT_PERMISSION_GATE_TARGETS: Record<string, PermissionTarget[]> = {
 function matchesRegex(regex: RegExp, value: string): boolean {
 	regex.lastIndex = 0;
 	return regex.test(value);
+}
+
+function matchesPermissionInput(rule: CompiledPermissionRule, input: PermissionRuleInput): boolean {
+	// Match sudo only when it appears as an actual command boundary, not inside quoted search text.
+	if (input.target === "command" && rule.rule.pattern.trim() === "sudo") {
+		return containsActualCommand(input.value, "sudo");
+	}
+
+	return matchesRegex(rule.regex, input.value);
 }
 
 type GuardrailsConfigScope = "project" | "global" | "repo-default";
@@ -551,7 +703,7 @@ export default function (pi: ExtensionAPI) {
 
 				for (const input of permissionInputs) {
 					if (!allowedTargets.has(input.target)) continue;
-					if (!matchesRegex(rule.regex, input.value)) continue;
+					if (!matchesPermissionInput(rule, input)) continue;
 
 					violationReason = formatRuleDescription(rule.rule, rule.rule.pattern);
 					shouldAsk = rule.rule.requireConfirmation ?? false;

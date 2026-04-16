@@ -28,21 +28,21 @@
         "description": "recursive force delete",
         "tools": ["bash"],
         "targets": ["command"],
-        "requireConfirmation": false
+        "requireConfirmation": true
       },
       {
         "pattern": "rm -rf /",
         "description": "recursive force delete",
         "tools": ["bash"],
         "targets": ["command"],
-        "requireConfirmation": false
+        "requireConfirmation": true
       },
       {
         "pattern": "sudo",
-        "description": "superuser command",
+        "description": "superuser command (confirmation required)",
         "tools": ["bash"],
         "targets": ["command"],
-        "requireConfirmation": false
+        "requireConfirmation": true
       },
       {
         "pattern": "child_process\\.(exec|execSync|spawn|spawnSync)\\s*\\(",
