@@ -1,0 +1,9 @@
+[user]
+	name = Evan Tan [pi-agent]
+	email = 36868915+evandotdev@users.noreply.github.com
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = false

@@ -46,6 +46,7 @@ const DEFAULT_CONFIG = {
 	runArgs: ["--cap-drop=ALL", "--security-opt=no-new-privileges", "--ipc=none"],
 	passEnv: true,
 	agentDir: path.join(os.homedir(), ".pi", "agent"),
+	gitconfig: "host",
 };
 
 const NETWORK_MODES = new Set(["none", "bridge", "host"]);
@@ -127,15 +128,33 @@ function mergeConfig(base, override) {
 	if (typeof override.agentDir === "string" && override.agentDir.trim().length > 0) {
 		merged.agentDir = override.agentDir.trim();
 	}
+	if (override.gitconfig === false) {
+		merged.gitconfig = false;
+	} else if (typeof override.gitconfig === "string" && override.gitconfig.trim().length > 0) {
+		merged.gitconfig = override.gitconfig.trim();
+	}
 	return merged;
+}
+
+function resolveConfigPath(configValue, baseDir) {
+	if (configValue === "~") return os.homedir();
+	if (typeof configValue === "string" && configValue.startsWith("~/")) {
+		return path.join(os.homedir(), configValue.slice(2));
+	}
+	if (typeof configValue !== "string") return undefined;
+	return path.isAbsolute(configValue) ? path.resolve(configValue) : path.resolve(baseDir, configValue);
 }
 
 function resolveConfig() {
 	const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "extensions", "docker-sandbox.json");
-	const projectConfigPath = path.join(cwd, ".pi", "docker-sandbox.json");
+	const hostCwd = realpathSync(cwd);
+	const projectRoot = findNearestPiRoot(hostCwd);
+	const projectConfigPath = projectRoot ? path.join(projectRoot, ".pi", "docker-sandbox.json") : undefined;
 	let config = { ...DEFAULT_CONFIG };
 	config = mergeConfig(config, readConfigFile(globalConfigPath));
-	config = mergeConfig(config, readConfigFile(projectConfigPath));
+	if (projectConfigPath) {
+		config = mergeConfig(config, readConfigFile(projectConfigPath));
+	}
 
 	if (process.env.PI_SANDBOX_IMAGE) config.image = process.env.PI_SANDBOX_IMAGE;
 	if (process.env.PI_SANDBOX_NETWORK && NETWORK_MODES.has(process.env.PI_SANDBOX_NETWORK)) {
@@ -149,7 +168,17 @@ function resolveConfig() {
 	if (!Array.isArray(config.folders) || config.folders.length === 0) {
 		fail("folders must contain at least one path");
 	}
-	return config;
+	return {
+		...config,
+		projectRoot,
+		projectConfigPath,
+		resolvedGitconfigPath:
+			config.gitconfig === false
+				? undefined
+				: config.gitconfig === "host"
+					? path.join(os.homedir(), ".gitconfig")
+					: resolveConfigPath(config.gitconfig, projectRoot ?? cwd),
+	};
 }
 
 function resolveFolderPath(folder) {
@@ -310,11 +339,14 @@ function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCw
 		dockerArgs.push("--volume", `${hostAgentsSkillsDir}:${CONTAINER_AGENTS_SKILLS_DIR}:ro`);
 	}
 
-	if (!parseEnvBoolean(process.env.PI_NO_GITCONFIG)) {
-		const hostGitconfig = path.join(hostHome, ".gitconfig");
-		if (existsSync(hostGitconfig) && statSync(hostGitconfig).isFile()) {
-			dockerArgs.push("--volume", `${hostGitconfig}:${CONTAINER_HOME}/.gitconfig:ro`);
+	if (!parseEnvBoolean(process.env.PI_NO_GITCONFIG) && config.resolvedGitconfigPath) {
+		if (!existsSync(config.resolvedGitconfigPath)) {
+			fail(`gitconfig does not exist: ${config.resolvedGitconfigPath}`);
 		}
+		if (!statSync(config.resolvedGitconfigPath).isFile()) {
+			fail(`gitconfig is not a file: ${config.resolvedGitconfigPath}`);
+		}
+		dockerArgs.push("--volume", `${config.resolvedGitconfigPath}:${CONTAINER_HOME}/.gitconfig:ro`);
 	}
 
 	dockerArgs.push("--env", `PI_SANDBOX_MODE=${readonly ? "docker-readonly" : "docker"}`);

@@ -11,5 +11,6 @@
     "--security-opt=no-new-privileges",
     "--ipc=none"
   ],
-  "passEnv": true
+  "passEnv": true,
+  "gitconfig": ".pi/gitconfig"
 }

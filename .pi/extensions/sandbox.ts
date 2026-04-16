@@ -120,6 +120,7 @@ function buildVerificationChecks(cwd: string): string[] {
 		checks.push(formatCheck("Project skills", join(projectPiRoot, "skills"), "dir", false));
 		checks.push(formatCheck("Project themes", join(projectPiRoot, "themes"), "dir", false));
 		checks.push(formatCheck("Project .pi/docker-sandbox.json", join(projectPiRoot, "docker-sandbox.json"), "file", false));
+		checks.push(formatCheck("Project .pi/gitconfig", join(projectPiRoot, "gitconfig"), "file", false));
 		checks.push(formatCheck("Project package git cache", join(projectPiRoot, "git"), "dir", false));
 		checks.push(formatCheck("Project package npm cache", join(projectPiRoot, "npm"), "dir", false));
 	} else {
@@ -175,11 +176,15 @@ export default function (pi: ExtensionAPI) {
 		description: "Show Docker sandbox status, folders, and mount/resource checks",
 		handler: async (_args, ctx) => {
 			snapshot = readSnapshot(ctx.cwd);
+			const projectPiRoot = findNearestProjectPiRoot(ctx.cwd);
+			const projectConfigPath = projectPiRoot
+				? join(projectPiRoot, "docker-sandbox.json")
+				: join(ctx.cwd, ".pi", "docker-sandbox.json");
 			const lines = [
 				formatSnapshot(snapshot),
 				"",
 				"Config files:",
-				`  Project: ${join(ctx.cwd, ".pi", "docker-sandbox.json")}`,
+				`  Project: ${projectConfigPath}`,
 				`  Global: ${join(getAgentDir(), "extensions", "docker-sandbox.json")}`,
 				"",
 				...buildVerificationChecks(ctx.cwd),
