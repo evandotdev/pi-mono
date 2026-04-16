@@ -10,9 +10,14 @@
 - Namespaced command groups for sessions and prompts, with canonical forms (`/session:*`, `/prompt:*`) and backward-compatible short aliases.
 - Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command, local sandbox image tooling, and `-v <folder>` overrides for extra sandbox mounts.
 - Stow-based machine setup automation for repo `.pi` resources and global `mise` task wrappers.
+- Current fork resources include `plan-mode/`, the `commit` and `security` skills, and bundled extensions `grep-home-shorten.ts`, `guardrails.ts`, `prompt-url-widget.ts`, `redraws.ts`, `sandbox.ts`, and `tps.ts`.
+- Legacy bundled `diff.ts` and `files.ts` extensions were removed from `.pi/extensions`.
 
 ### Added
 
+- Added `plan-mode/` branch-based planning extension with `/plan` workflow and approval/implementation handoff.
+- Added `commit` and `security` skills under `.pi/skills/` for commit formatting and security review/hardening workflows.
+- Added `grep-home-shorten.ts` and `tps.ts` bundled extensions for shorter grep output and tokens-per-second visibility.
 - Added OAuth usage visibility in interactive mode: footer and OAuth account selectors now show provider utilization windows and reset timing for Anthropic, OpenAI Codex, and Antigravity accounts.
 - Added multi-account OAuth selection flows in interactive mode, including account selection when switching models and richer account labels in login/model pickers.
 - Added slash commands `/thinking <off|minimal|low|medium|high|xhigh>` and `/context [show|clear]` for direct reasoning-level control and context inspection/clearing.
@@ -26,6 +31,8 @@
 
 ### Changed
 
+- Changed sandbox wrappers to accept repeated `-v/--volume` folder mounts for extra sandbox directories, resolved relative to the wrapper launch directory.
+- Changed sandbox runs to use the repo-local minimal `.pi/gitconfig` instead of mounting the host gitconfig.
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 - Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
 - Changed footer OAuth usage rendering to show all available usage windows (for example `5h` and `7d`) with clearer utilization colorization.
@@ -34,12 +41,17 @@
 
 ### Fixed
 
+- Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
 - Fixed Alt keybindings inside Zellij by skipping the Kitty keyboard protocol query there and enabling xterm `modifyOtherKeys` mode 2 directly ([#3163](https://github.com/badlogic/pi-mono/issues/3163))
 - Fixed `/scoped-models` reordering to propagate into the `/model` scoped tab, preserving the user-defined scoped model order instead of re-sorting it ([#3217](https://github.com/badlogic/pi-mono/issues/3217))
 - Fixed `session_shutdown` to fire on `SIGHUP` and `SIGTERM` in interactive, print, and RPC modes so extensions can run shutdown cleanup on those signal-driven exits ([#3212](https://github.com/badlogic/pi-mono/issues/3212))
 - Fixed screenshot path parsing to handle lower case am/pm in macOS screenshot filenames ([#3194](https://github.com/badlogic/pi-mono/pull/3194) by [@jay-aye-see-kay](https://github.com/jay-aye-see-kay))
 - Fixed interactive auto-retry status updates to show a live countdown during backoff instead of a static retry delay message ([#3187](https://github.com/badlogic/pi-mono/issues/3187))
 - Fixed footer context usage display immediately after compaction by falling back to estimated usage when exact measured usage is temporarily unavailable.
+
+### Removed
+
+- Removed bundled `diff.ts` and `files.ts` extensions from `.pi/extensions`.
 
 ## [0.67.2] - 2026-04-14
 
