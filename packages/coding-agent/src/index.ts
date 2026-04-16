@@ -154,6 +154,20 @@ export type {
 export { DefaultPackageManager } from "./core/package-manager.js";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.js";
 export { DefaultResourceLoader } from "./core/resource-loader.js";
+export {
+	collectSandboxReport,
+	DEFAULT_DOCKER_SANDBOX_CONFIG,
+	DEFAULT_OS_SANDBOX_CONFIG,
+	type DockerSandboxConfig,
+	findNearestPiRoot,
+	formatSandboxReport,
+	type OsSandboxConfig,
+	type OsSandboxFilesystemConfig,
+	type OsSandboxNetworkConfig,
+	type SandboxConfigSource,
+	type SandboxPathState,
+	type SandboxReport,
+} from "./core/sandbox-info.js";
 // SDK for programmatic usage
 export {
 	AgentSessionRuntime,

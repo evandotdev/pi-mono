@@ -33,6 +33,7 @@
  * - `pi -e ./sandbox` - sandbox enabled with default/config settings
  * - `pi -e ./sandbox --no-sandbox` - disable sandboxing
  * - `/sandbox` - show current sandbox configuration
+ * - `/sandbox:info` - show sandbox topology, config precedence, and repo file map
  *
  * Setup:
  * 1. Copy sandbox/ directory to ~/.pi/agent/extensions/
@@ -45,8 +46,14 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { type BashOperations, createBashTool, getAgentDir } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import {
+	type BashOperations,
+	collectSandboxReport,
+	createBashTool,
+	formatSandboxReport,
+	getAgentDir,
+} from "@mariozechner/pi-coding-agent";
 
 interface SandboxConfig extends SandboxRuntimeConfig {
 	enabled?: boolean;
@@ -127,6 +134,11 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
 	}
 
 	return result;
+}
+
+function buildSandboxInspectionReport(cwd: string): string {
+	const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
+	return formatSandboxReport(collectSandboxReport({ cwd, agentDir, homeDir: process.env.HOME ?? undefined }));
 }
 
 function createSandboxedBashOps(): BashOperations {
@@ -317,5 +329,19 @@ export default function (pi: ExtensionAPI) {
 			];
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
+	});
+
+	const sandboxInfoHandler = async (_args: string, ctx: ExtensionCommandContext) => {
+		ctx.ui.notify(buildSandboxInspectionReport(ctx.cwd), "info");
+	};
+
+	pi.registerCommand("sandbox:info", {
+		description: "Show sandbox topology, config precedence, and repo file map",
+		handler: sandboxInfoHandler,
+	});
+
+	pi.registerCommand("doctor:sandbox", {
+		description: "Show sandbox topology, config precedence, and repo file map",
+		handler: sandboxInfoHandler,
 	});
 }

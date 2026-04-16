@@ -1,7 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { collectSandboxReport, formatSandboxReport, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 interface SandboxMount {
 	hostPath: string;
@@ -180,6 +180,11 @@ function buildVerificationChecks(cwd: string): string[] {
 	return checks;
 }
 
+function buildSandboxInspectionReport(cwd: string): string {
+	const agentDir = process.env.PI_CODING_AGENT_DIR ?? getAgentDir();
+	return formatSandboxReport(collectSandboxReport({ cwd, agentDir, homeDir: os.homedir() }));
+}
+
 export default function (pi: ExtensionAPI) {
 	let snapshot = readSnapshot(process.cwd());
 
@@ -226,5 +231,19 @@ export default function (pi: ExtensionAPI) {
 			];
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
+	});
+
+	const sandboxInfoHandler = async (_args: string, ctx: ExtensionContext) => {
+		ctx.ui.notify(buildSandboxInspectionReport(ctx.cwd), "info");
+	};
+
+	pi.registerCommand("sandbox:info", {
+		description: "Show sandbox topology, config precedence, and repo file map",
+		handler: sandboxInfoHandler,
+	});
+
+	pi.registerCommand("doctor:sandbox", {
+		description: "Show sandbox topology, config precedence, and repo file map",
+		handler: sandboxInfoHandler,
 	});
 }
