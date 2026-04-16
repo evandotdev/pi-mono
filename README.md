@@ -117,11 +117,35 @@ mise run pi:yolo           # Run directly from source (no sandbox)
 mise run pi:build          # Build/rebuild sandbox image
 ```
 
-To make these `pi:*` tasks available machine-wide (so `mise run pi` works from any directory), stow the global mise task package from this repo:
+#### New machine setup
+
+Recommended setup flow:
 
 ```bash
+git clone <your-fork-or-upstream> ~/pi-mono
+cd ~/pi-mono
+
+# install mise first, then trust the repo config
+mise trust
+
+# optional: make pi:* mise tasks available globally
 mise run pi:stow:mise:install
+
+# optional: link repo .pi resources into ~/.pi
+mise run pi:stow:install
 ```
+
+What these do:
+
+- `mise trust` allows mise to use this repo's task configuration.
+- `pi:stow:mise:install` stows global `mise` task wrappers so `mise run pi` works from any directory.
+- `pi:stow:install` symlinks the repo's `.pi` resources into `~/.pi`.
+
+Sandbox git config:
+
+- Docker sandbox runs in this repo use `.pi/gitconfig` via `.pi/docker-sandbox.json`.
+- This avoids mounting your host `~/.gitconfig` into the container.
+- The sandbox git config is intentionally minimal and is suitable for local commits only. Push from the host afterward.
 
 To remove those global task symlinks later:
 
@@ -131,10 +155,9 @@ mise run pi:stow:mise:uninstall
 
 Global wrappers default to `~/pi-mono`. If your checkout lives elsewhere, set `PI_MONO_ROOT`.
 
-To manage `~/.pi` from the repo's `.pi` directory:
+To remove the `~/.pi` links later:
 
 ```bash
-mise run pi:stow:install
 mise run pi:stow:uninstall
 ```
 
