@@ -5,6 +5,7 @@ import type { AuthCredential, AuthStorage } from "../../../core/auth-storage.js"
 import type { OAuthAccountUsage } from "../../../core/usage-service.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
+import { formatOAuthUsageErrorLabel } from "./oauth-selector-utils.js";
 
 type HeaderRow = {
 	kind: "header";
@@ -44,6 +45,7 @@ export class OAuthSelectorComponent extends Container {
 	private mode: "login" | "logout";
 	private authStorage: AuthStorage;
 	private providerAccountUsage: ReadonlyMap<string, readonly OAuthAccountUsage[]>;
+	private getUsageFetchError: (providerId: string, credentialIndex: number) => string | undefined;
 	private onSelectCallback: (providerId: string, targetIndex: number | null) => void;
 	private onCancelCallback: () => void;
 
@@ -51,6 +53,7 @@ export class OAuthSelectorComponent extends Container {
 		mode: "login" | "logout",
 		authStorage: AuthStorage,
 		providerAccountUsage: ReadonlyMap<string, readonly OAuthAccountUsage[]>,
+		getUsageFetchError: (providerId: string, credentialIndex: number) => string | undefined,
 		onSelect: (providerId: string, targetIndex: number | null) => void,
 		onCancel: () => void,
 	) {
@@ -58,6 +61,7 @@ export class OAuthSelectorComponent extends Container {
 		this.mode = mode;
 		this.authStorage = authStorage;
 		this.providerAccountUsage = providerAccountUsage;
+		this.getUsageFetchError = getUsageFetchError;
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
@@ -126,9 +130,13 @@ export class OAuthSelectorComponent extends Container {
 
 	private getUsageLabel(providerId: string, credentialIndex: number): string {
 		const usageEntry = this.getUsageEntry(providerId, credentialIndex);
-		if (!usageEntry) return "";
-		const activeLabel = usageEntry.active ? ` ${theme.fg("success", "active")}` : "";
-		return `  ${this.formatUsageLabel(usageEntry.usage)}${activeLabel}`;
+		if (usageEntry) {
+			const activeLabel = usageEntry.active ? ` ${theme.fg("success", "active")}` : "";
+			return `  ${this.formatUsageLabel(usageEntry.usage)}${activeLabel}`;
+		}
+		const errorLabel = formatOAuthUsageErrorLabel(this.mode, this.getUsageFetchError(providerId, credentialIndex));
+		if (!errorLabel) return "";
+		return `  ${theme.fg("error", errorLabel)}`;
 	}
 
 	private accountLabel(providerId: string, cred: AuthCredential, index: number): string {

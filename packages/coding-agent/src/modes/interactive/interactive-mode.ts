@@ -4250,11 +4250,19 @@ export class InteractiveMode {
 			}
 		}
 
+		if (this.usageService) {
+			for (const providerId of this.session.modelRegistry.authStorage.list()) {
+				await this.usageService.refreshProvider(providerId);
+			}
+		}
+
 		this.showSelector((done) => {
 			const selector = new OAuthSelectorComponent(
 				mode,
 				this.session.modelRegistry.authStorage,
 				this.usageService?.getAllAccountUsage() ?? new Map(),
+				(providerId: string, credentialIndex: number) =>
+					this.usageService?.getUsageFetchError(providerId, credentialIndex),
 				async (providerId: string, targetIndex: number | null) => {
 					done();
 

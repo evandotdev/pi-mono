@@ -24,6 +24,11 @@ export type OAuthAccountUsage = {
 	active: boolean;
 };
 
+type UsageFetchErrorEntry = {
+	message: string;
+	occurredAt: number;
+};
+
 /**
  * Format a duration in milliseconds to a human-readable string like "3h11m" or "42m".
  */
@@ -86,6 +91,7 @@ export function formatUsageReport(accountUsage: ReadonlyMap<string, readonly OAu
 export class UsageService {
 	private cache = new Map<string, CacheEntry>();
 	private accountUsage = new Map<string, OAuthAccountUsage[]>();
+	private fetchErrors = new Map<string, UsageFetchErrorEntry>();
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private disposed = false;
 
@@ -130,8 +136,35 @@ export class UsageService {
 		return this.accountUsage.get(providerId)?.find((entry) => entry.credentialIndex === activeIndex)?.usage;
 	}
 
+	/** Get the last usage fetch error for a specific OAuth credential, if any. */
+	getUsageFetchError(providerId: string, credentialIndex: number): string | undefined {
+		const credential = this.authStorage.getCredentials(providerId)[credentialIndex];
+		if (!credential || credential.type !== "oauth") return undefined;
+		const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
+		return this.fetchErrors.get(this.getCacheKey(providerId, credentialIndex, accountId))?.message;
+	}
+
 	private getCacheKey(providerId: string, credentialIndex: number, accountId?: string): string {
 		return `${providerId}:${accountId ?? `index:${credentialIndex}`}`;
+	}
+
+	private clearUsageFetchError(providerId: string, credentialIndex: number, accountId?: string): void {
+		this.fetchErrors.delete(this.getCacheKey(providerId, credentialIndex, accountId));
+	}
+
+	private setUsageFetchError(providerId: string, credentialIndex: number, message: string, accountId?: string): void {
+		this.fetchErrors.set(this.getCacheKey(providerId, credentialIndex, accountId), {
+			message,
+			occurredAt: Date.now(),
+		});
+	}
+
+	private formatUsageFetchError(error: unknown): string {
+		if (error instanceof Error) {
+			const message = error.message.trim();
+			if (message.length > 0) return message;
+		}
+		return "Usage request failed";
 	}
 
 	private async ensureFreshCredential(
@@ -197,6 +230,7 @@ export class UsageService {
 
 			if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
 				usage = cached.usage;
+				this.clearUsageFetchError(providerId, credentialIndex, accountId);
 			} else {
 				const freshCredential = await this.ensureFreshCredential(providerId, credentialIndex, credential);
 				try {
@@ -205,7 +239,9 @@ export class UsageService {
 						this.cache.set(cacheKey, { usage: fetchedUsage, fetchedAt: Date.now() });
 						usage = fetchedUsage;
 					}
-				} catch {
+					this.clearUsageFetchError(providerId, credentialIndex, accountId);
+				} catch (error) {
+					this.setUsageFetchError(providerId, credentialIndex, this.formatUsageFetchError(error), accountId);
 					usage = cached?.usage;
 				}
 			}
