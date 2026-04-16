@@ -1,6 +1,6 @@
 ---
 name: security
-description: Security review and hardening workflow for codebases, including dependency supply-chain safeguards, secret scanning, and actionable remediation steps.
+description: Read this before installing any packages, dependencies to prevent supply chain attacks and reduce likelihood of other vulnerabilities.
 ---
 
 # Security Skill
