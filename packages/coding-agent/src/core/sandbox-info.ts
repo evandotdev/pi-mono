@@ -123,8 +123,11 @@ const RELEVANT_FILES = [
 ] as const;
 
 export function findNearestPiRoot(startDir: string): string | undefined {
+	const homeDir = os.homedir();
 	let current = startDir;
 	while (true) {
+		// Stop before the home directory so ~/.pi stays config-only and never becomes a mounted project root.
+		if (current === homeDir) return undefined;
 		const candidate = join(current, ".pi");
 		if (isDirectory(candidate)) return current;
 		const parent = dirname(current);

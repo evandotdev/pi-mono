@@ -46,6 +46,7 @@
 - Fixed Docker sandbox image builds on Linux arm64 by explicitly installing the matching `@typescript/native-preview` platform package before workspace builds.
 - Fixed `pi:stow:mise:install` to also manage a global sandbox gitconfig override so `mise run pi` works from other repositories without requiring a host `~/.gitconfig`.
 - Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
+- Fixed sandbox root detection so `~/.pi` stays config-only and `mise run pi` no longer mounts the entire `$HOME` tree when a repo-local `.pi` is absent.
 - Fixed `pi:yolo` mistakenly treating wrapper-style extra-directory flags as pi CLI flags by reserving `-d/--directory` for sandbox wrapper mounts and rejecting those flags in the direct-source wrapper.
 - Fixed sandboxed `mise run pi` wrappers launched outside `~/pi-mono` to keep the caller's cwd while still mounting the fork checkout and loading repo-local prompts, skills, and extensions from `~/pi-mono`.
 - Fixed Alt keybindings inside Zellij by skipping the Kitty keyboard protocol query there and enabling xterm `modifyOtherKeys` mode 2 directly ([#3163](https://github.com/badlogic/pi-mono/issues/3163))

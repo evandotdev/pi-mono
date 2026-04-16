@@ -249,8 +249,11 @@ function toPosixPath(value) {
 }
 
 function findNearestPiRoot(startDir) {
+	const homeDir = os.homedir();
 	let current = startDir;
 	while (true) {
+		// Stop before the home directory so ~/.pi stays config-only and never becomes a mounted project root.
+		if (current === homeDir) return undefined;
 		const candidate = path.join(current, ".pi");
 		if (existsSync(candidate)) {
 			const stats = statSync(candidate);
