@@ -1,10 +1,8 @@
 {
   "enabled": true,
   "image": "pi-sandbox:latest",
-  "network": "bridge",
-  "folders": [
-    "."
-  ],
+  "network": "host",
+  "folders": ["."],
   "pullOnStart": false,
   "runArgs": [
     "--cap-drop=ALL",
