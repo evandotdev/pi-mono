@@ -100,7 +100,7 @@ describe("FooterComponent width handling", () => {
 	});
 
 	it("renders provider/model/thinking on first line and keeps all lines within width", () => {
-		const width = 60;
+		const width = 70;
 		const session = createSession({
 			sessionName: "",
 			modelId: "模".repeat(10),
@@ -131,7 +131,7 @@ describe("FooterComponent width handling", () => {
 		expect(plainSecondLine).not.toContain("high");
 	});
 
-	it("keeps context usage counter visible when stats are truncated", () => {
+	it("keeps the context summary visible when stats are truncated", () => {
 		const width = 44;
 		const session = createSession({
 			sessionName: "",
@@ -149,6 +149,40 @@ describe("FooterComponent width handling", () => {
 
 		const lines = footer.render(width);
 		expect(visibleWidth(lines[1])).toBeLessThanOrEqual(width);
-		expect(stripAnsi(lines[1])).toContain("12.3%/200k (auto)");
+
+		const plainSecondLine = stripAnsi(lines[1]);
+		expect(plainSecondLine).toMatch(/^Ctx:/);
+		expect(plainSecondLine).toContain("12% of 200k");
+		expect(plainSecondLine).toContain("Cost:");
+	});
+
+	it("keeps the pi version on the left of token stats", () => {
+		const width = 120;
+		const session = createSession({
+			sessionName: "",
+			modelId: "very-long-model-name-for-truncation",
+			provider: "test",
+			usage: {
+				input: 343_000,
+				output: 34_000,
+				cacheRead: 1_800_000,
+				cacheWrite: 0,
+				cost: { total: 0.55 },
+			},
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(width);
+		expect(visibleWidth(lines[2])).toBeLessThanOrEqual(width);
+
+		const plainThirdLine = stripAnsi(lines[2]);
+		const separatorIndex = plainThirdLine.indexOf("│");
+		expect(separatorIndex).toBeGreaterThan(0);
+
+		const prefixBeforeSeparator = plainThirdLine.slice(0, separatorIndex);
+		expect(prefixBeforeSeparator).toMatch(/^Pi:/);
+		expect(prefixBeforeSeparator).not.toMatch(/ {2,}$/);
+		expect(plainThirdLine).toContain("Tokens:");
+		expect(plainThirdLine.indexOf("Pi:")).toBeLessThan(plainThirdLine.indexOf("Tokens:"));
 	});
 });

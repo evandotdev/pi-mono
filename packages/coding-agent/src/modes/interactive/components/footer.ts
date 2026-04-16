@@ -292,7 +292,7 @@ function colorizePercent(percentText: string, utilizationPercent: number): strin
 
 /**
  * Footer component that shows cwd/session/model on the first line, context/usage/cost on the second,
- * token stats plus pi version on the third, and extension statuses below that.
+ * pi version plus token stats on the third, and extension statuses below that.
  */
 export class FooterComponent implements Component {
 	private static readonly GIT_SUMMARY_TTL_MS = 1500;
@@ -466,7 +466,7 @@ export class FooterComponent implements Component {
 		const line1RightSection = usageSegment ?? "";
 		const line1 = line1RightSection
 			? fitLeftAndRight(line1LeftSection, line1RightSection, width, separator)
-			: line1LeftSection;
+			: truncateToWidth(line1LeftSection, width, theme.fg("dim", "..."));
 
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		const costValue = `${theme.fg("dim", formatCost(totalCost))}${usingSubscription ? theme.fg("dim", " (sub)") : ""}`;
@@ -486,7 +486,7 @@ export class FooterComponent implements Component {
 		const tokensSegment = tokenParts.length > 0 ? `${label("Tokens")}${theme.fg("dim", tokenParts.join(" "))}` : "";
 		const piVersionDisplay = getPiVersionDisplay();
 		const piSegment = piVersionDisplay ? `${label("Pi")}${theme.fg("dim", piVersionDisplay)}` : "";
-		const line3 = fitLeftAndRight(tokensSegment, piSegment, width, separator);
+		const line3 = truncateToWidth(joinSegments([piSegment, tokensSegment], separator), width, theme.fg("dim", "..."));
 
 		const lines = [line1, line2];
 		if (line3) {
