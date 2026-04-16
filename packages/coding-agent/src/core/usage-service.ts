@@ -8,6 +8,9 @@
 
 import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
+import { getAgentDir } from "../config.js";
 import type { AuthStorage, OAuthCredential } from "./auth-storage.js";
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -29,6 +32,11 @@ type UsageFetchErrorEntry = {
 	occurredAt: number;
 };
 
+type PersistedUsageCache = {
+	version: 1;
+	entries: Record<string, CacheEntry>;
+};
+
 /**
  * Format a duration in milliseconds to a human-readable string like "3h11m" or "42m".
  */
@@ -38,6 +46,58 @@ function formatResetDuration(ms: number): string {
 	const m = Math.floor((ms % 3600000) / 60000);
 	if (h > 0) return `${h}h${m}m`;
 	return `${m}m`;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseUsageWindow(value: unknown): ProviderUsage["windows"][string] | undefined {
+	if (!isObjectRecord(value)) return undefined;
+	const utilizationPercent = value.utilizationPercent;
+	const resetsAt = value.resetsAt;
+	if (typeof utilizationPercent !== "number" || !Number.isFinite(utilizationPercent)) return undefined;
+	if (resetsAt !== undefined && (typeof resetsAt !== "number" || !Number.isFinite(resetsAt))) return undefined;
+	return resetsAt === undefined ? { utilizationPercent } : { utilizationPercent, resetsAt };
+}
+
+function parseProviderUsage(value: unknown): ProviderUsage | undefined {
+	if (!isObjectRecord(value)) return undefined;
+	const windowsRaw = value.windows;
+	if (!isObjectRecord(windowsRaw)) return undefined;
+
+	const windows: ProviderUsage["windows"] = {};
+	for (const [windowName, windowValue] of Object.entries(windowsRaw)) {
+		const parsedWindow = parseUsageWindow(windowValue);
+		if (!parsedWindow) return undefined;
+		windows[windowName] = parsedWindow;
+	}
+
+	return { windows };
+}
+
+function parseCacheEntry(value: unknown): CacheEntry | undefined {
+	if (!isObjectRecord(value)) return undefined;
+	const fetchedAt = value.fetchedAt;
+	if (typeof fetchedAt !== "number" || !Number.isFinite(fetchedAt)) return undefined;
+	const usage = parseProviderUsage(value.usage);
+	if (!usage) return undefined;
+	return { usage, fetchedAt };
+}
+
+function parsePersistedUsageCache(value: unknown): Map<string, CacheEntry> {
+	if (!isObjectRecord(value) || value.version !== 1 || !isObjectRecord(value.entries)) {
+		return new Map();
+	}
+
+	const entries = new Map<string, CacheEntry>();
+	for (const [cacheKey, entryValue] of Object.entries(value.entries)) {
+		const entry = parseCacheEntry(entryValue);
+		if (entry) {
+			entries.set(cacheKey, entry);
+		}
+	}
+	return entries;
 }
 
 /**
@@ -98,11 +158,14 @@ export class UsageService {
 	constructor(
 		private readonly authStorage: AuthStorage,
 		private readonly onUsageUpdate: (providerId: string, usage: ProviderUsage) => void,
+		private readonly cachePath: string = join(getAgentDir(), "usage-cache.json"),
 	) {}
 
-	/** Start background polling. Fetches immediately, then every CACHE_TTL. */
+	/** Start background polling. Restores cached usage immediately, then refreshes in background. */
 	start(): void {
 		if (this.disposed) return;
+		this.loadPersistedCache();
+		this.hydrateAccountUsageFromCache();
 		void this.fetchAll();
 		this.scheduleNext();
 	}
@@ -146,6 +209,69 @@ export class UsageService {
 
 	private getCacheKey(providerId: string, credentialIndex: number, accountId?: string): string {
 		return `${providerId}:${accountId ?? `index:${credentialIndex}`}`;
+	}
+
+	private loadPersistedCache(): void {
+		if (!existsSync(this.cachePath)) return;
+		try {
+			const raw = readFileSync(this.cachePath, "utf-8");
+			this.cache = parsePersistedUsageCache(JSON.parse(raw) as unknown);
+		} catch {
+			this.cache = new Map();
+		}
+	}
+
+	private persistCache(): void {
+		try {
+			const dir = dirname(this.cachePath);
+			if (!existsSync(dir)) {
+				mkdirSync(dir, { recursive: true, mode: 0o700 });
+			}
+
+			const entries: PersistedUsageCache["entries"] = {};
+			for (const [cacheKey, entry] of this.cache) {
+				entries[cacheKey] = entry;
+			}
+
+			const serialized: PersistedUsageCache = { version: 1, entries };
+			writeFileSync(this.cachePath, `${JSON.stringify(serialized, null, 2)}\n`, "utf-8");
+			chmodSync(this.cachePath, 0o600);
+		} catch {
+			// Ignore cache persistence failures.
+		}
+	}
+
+	private hydrateAccountUsageFromCache(): void {
+		this.accountUsage.clear();
+		for (const providerId of this.authStorage.list()) {
+			const credentials = this.authStorage.getCredentials(providerId);
+			const activeIndex = this.authStorage.getActiveIndex(providerId);
+			const nextAccountUsage: OAuthAccountUsage[] = [];
+
+			for (let credentialIndex = 0; credentialIndex < credentials.length; credentialIndex++) {
+				const credential = credentials[credentialIndex];
+				if (!credential || credential.type !== "oauth") continue;
+
+				const accountId = typeof credential.accountId === "string" ? credential.accountId : undefined;
+				const cacheKey = this.getCacheKey(providerId, credentialIndex, accountId);
+				const cached = this.cache.get(cacheKey);
+				if (!cached) continue;
+
+				nextAccountUsage.push({
+					credentialIndex,
+					accountId,
+					usage: cached.usage,
+					active: credentialIndex === activeIndex,
+				});
+			}
+
+			if (nextAccountUsage.length === 0) continue;
+			this.accountUsage.set(providerId, nextAccountUsage);
+			const activeUsage = nextAccountUsage.find((entry) => entry.active)?.usage;
+			if (activeUsage) {
+				this.onUsageUpdate(providerId, activeUsage);
+			}
+		}
 	}
 
 	private clearUsageFetchError(providerId: string, credentialIndex: number, accountId?: string): void {
@@ -218,6 +344,7 @@ export class UsageService {
 		const credentials = this.authStorage.getCredentials(providerId);
 		const activeIndex = this.authStorage.getActiveIndex(providerId);
 		const nextAccountUsage: OAuthAccountUsage[] = [];
+		let cacheUpdated = false;
 
 		for (let credentialIndex = 0; credentialIndex < credentials.length; credentialIndex++) {
 			const credential = credentials[credentialIndex];
@@ -237,6 +364,7 @@ export class UsageService {
 					const fetchedUsage = await provider.fetchUsage(freshCredential);
 					if (fetchedUsage && !this.disposed) {
 						this.cache.set(cacheKey, { usage: fetchedUsage, fetchedAt: Date.now() });
+						cacheUpdated = true;
 						usage = fetchedUsage;
 					}
 					this.clearUsageFetchError(providerId, credentialIndex, accountId);
@@ -255,6 +383,10 @@ export class UsageService {
 				usage,
 				active,
 			});
+		}
+
+		if (cacheUpdated) {
+			this.persistCache();
 		}
 
 		if (nextAccountUsage.length > 0) {

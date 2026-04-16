@@ -1,14 +1,26 @@
 import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { spawnSync } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import { basename, dirname, join } from "path";
+import { getPackageDir, VERSION } from "../../../config.js";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { theme } from "../theme/theme.js";
+
+type GitSummary = {
+	branch: string | null;
+	linesAdded: number;
+	linesRemoved: number;
+	syncStatus: string;
+};
+
+let cachedPiVersionDisplay: string | null | undefined;
 
 /**
  * Sanitize text for display in a single-line status.
  * Removes newlines, tabs, carriage returns, and other control characters.
  */
 function sanitizeStatusText(text: string): string {
-	// Replace newlines, tabs, carriage returns with space, then collapse multiple spaces
 	return text
 		.replace(/[\r\n\t]/g, " ")
 		.replace(/ +/g, " ")
@@ -26,6 +38,232 @@ function formatTokens(count: number): string {
 	return `${Math.round(count / 1000000)}M`;
 }
 
+function formatCost(totalCost: number): string {
+	if (totalCost === 0) return "$0.00";
+	if (totalCost < 0.01) return `${(totalCost * 100).toFixed(1)}¢`;
+	return `$${totalCost.toFixed(2)}`;
+}
+
+function ansiFg(code: string, text: string): string {
+	return `${code}${text}\x1b[39m`;
+}
+
+function white(text: string): string {
+	return ansiFg("\x1b[37m", text);
+}
+
+function yellow(text: string): string {
+	return ansiFg("\x1b[33m", text);
+}
+
+function green(text: string): string {
+	return ansiFg("\x1b[32m", text);
+}
+
+function red(text: string): string {
+	return ansiFg("\x1b[31m", text);
+}
+
+function joinSegments(segments: Array<string | undefined>, separator: string): string {
+	return segments.filter((segment): segment is string => Boolean(segment && segment.length > 0)).join(separator);
+}
+
+function fitLeftAndRight(left: string, right: string, width: number, separator: string): string {
+	const ellipsis = theme.fg("dim", "...");
+
+	if (!left && !right) return "";
+	if (!right) return truncateToWidth(left, width, ellipsis);
+	if (!left) return truncateToWidth(right, width, ellipsis);
+
+	const rightWidth = visibleWidth(right);
+	const separatorWidth = visibleWidth(separator);
+	if (rightWidth >= width) {
+		return truncateToWidth(right, width, ellipsis);
+	}
+
+	const availableForLeft = width - separatorWidth - rightWidth;
+	if (availableForLeft <= 0) {
+		return truncateToWidth(right, width, ellipsis);
+	}
+
+	const fittedLeft = truncateToWidth(left, availableForLeft, ellipsis);
+	const extraPaddingWidth = Math.max(0, width - visibleWidth(fittedLeft) - separatorWidth - rightWidth);
+	return `${fittedLeft}${" ".repeat(extraPaddingWidth)}${separator}${right}`;
+}
+
+function runGitCommand(repoDir: string, args: string[]): string | null {
+	const result = spawnSync("git", ["--no-optional-locks", ...args], {
+		cwd: repoDir,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	if (result.status !== 0) return null;
+	const output = result.stdout.trim();
+	return output || null;
+}
+
+function runGitCommandSuccess(repoDir: string, args: string[]): boolean {
+	const result = spawnSync("git", ["--no-optional-locks", ...args], {
+		cwd: repoDir,
+		encoding: "utf8",
+		stdio: ["ignore", "ignore", "ignore"],
+	});
+	return result.status === 0;
+}
+
+function findGitRepoDir(startDir: string): string | null {
+	let dir = startDir;
+	while (true) {
+		if (existsSync(join(dir, ".git"))) {
+			return dir;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
+function isPiMonoRepoRoot(dir: string): boolean {
+	const rootPackageJsonPath = join(dir, "package.json");
+	if (
+		!existsSync(rootPackageJsonPath) ||
+		!existsSync(join(dir, "packages", "ai", "package.json")) ||
+		!existsSync(join(dir, "packages", "coding-agent", "package.json"))
+	) {
+		return false;
+	}
+
+	try {
+		const packageJson = JSON.parse(readFileSync(rootPackageJsonPath, "utf8")) as { name?: string };
+		return packageJson.name === "pi-monorepo";
+	} catch {
+		return false;
+	}
+}
+
+function findPiMonoRepoRoot(startDir: string): string | null {
+	let dir = startDir;
+	while (true) {
+		if (isPiMonoRepoRoot(dir)) {
+			return dir;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) return null;
+		dir = parent;
+	}
+}
+
+function resolveBaseBranch(repoDir: string): string | null {
+	if (runGitCommandSuccess(repoDir, ["show-ref", "--verify", "--quiet", "refs/heads/main"])) {
+		return "main";
+	}
+	if (runGitCommandSuccess(repoDir, ["show-ref", "--verify", "--quiet", "refs/heads/master"])) {
+		return "master";
+	}
+	return null;
+}
+
+function parseShortStat(diffStats: string): { linesAdded: number; linesRemoved: number } {
+	const linesAddedMatch = diffStats.match(/(\d+)\s+insertion/);
+	const linesRemovedMatch = diffStats.match(/(\d+)\s+deletion/);
+	return {
+		linesAdded: linesAddedMatch ? Number.parseInt(linesAddedMatch[1], 10) : 0,
+		linesRemoved: linesRemovedMatch ? Number.parseInt(linesRemovedMatch[1], 10) : 0,
+	};
+}
+
+function resolveGitSummary(cwd: string, branch: string | null): GitSummary | null {
+	const repoDir = findGitRepoDir(cwd);
+	if (!repoDir || !branch) return null;
+
+	const baseBranch = resolveBaseBranch(repoDir);
+	const diffTarget = baseBranch && branch !== "detached" && branch !== baseBranch ? `${baseBranch}...HEAD` : "HEAD";
+	const diffStats = runGitCommand(repoDir, ["diff", "--shortstat", diffTarget]) ?? "";
+	const { linesAdded, linesRemoved } = parseShortStat(diffStats);
+
+	let syncStatus = "";
+	const upstream = runGitCommand(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
+	if (upstream) {
+		const counts = runGitCommand(repoDir, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
+		if (counts) {
+			const [aheadRaw = "0", behindRaw = "0"] = counts.split(/\s+/);
+			const ahead = Number.parseInt(aheadRaw, 10) || 0;
+			const behind = Number.parseInt(behindRaw, 10) || 0;
+			if (ahead === 0 && behind === 0) syncStatus = "✓";
+			else if (ahead > 0 && behind === 0) syncStatus = `↑${ahead}`;
+			else if (ahead === 0 && behind > 0) syncStatus = `↓${behind}`;
+			else syncStatus = `↑${ahead}↓${behind}`;
+		}
+	}
+
+	return {
+		branch,
+		linesAdded,
+		linesRemoved,
+		syncStatus,
+	};
+}
+
+function getPiVersionDisplay(): string | null {
+	if (cachedPiVersionDisplay !== undefined) {
+		return cachedPiVersionDisplay;
+	}
+
+	const repoRoot = findPiMonoRepoRoot(getPackageDir());
+	if (!repoRoot) {
+		cachedPiVersionDisplay = `v${VERSION}`;
+		return cachedPiVersionDisplay;
+	}
+
+	const tag = runGitCommand(repoRoot, ["describe", "--tags", "--abbrev=0"]);
+	const shortHash = runGitCommand(repoRoot, ["rev-parse", "--short", "HEAD"]);
+	if (tag && shortHash) {
+		cachedPiVersionDisplay = `${tag} ${shortHash}`;
+		return cachedPiVersionDisplay;
+	}
+	if (tag) {
+		cachedPiVersionDisplay = tag;
+		return cachedPiVersionDisplay;
+	}
+	if (shortHash) {
+		cachedPiVersionDisplay = `v${VERSION} ${shortHash}`;
+		return cachedPiVersionDisplay;
+	}
+
+	cachedPiVersionDisplay = `v${VERSION}`;
+	return cachedPiVersionDisplay;
+}
+
+function buildContextBar(percent: number): string {
+	const clampedPercent = Math.max(0, Math.min(100, percent));
+	const filled = "\x1b[38;5;245m█\x1b[39m";
+	const partial = "\x1b[38;5;245m▄\x1b[39m";
+	const empty = "\x1b[38;5;238m░\x1b[39m";
+	let bar = "";
+
+	for (let i = 0; i < 10; i++) {
+		const bucketStart = i * 10;
+		const progress = clampedPercent - bucketStart;
+		if (progress >= 8) {
+			bar += filled;
+		} else if (progress >= 3) {
+			bar += partial;
+		} else {
+			bar += empty;
+		}
+	}
+
+	return bar;
+}
+
+function formatResetCountdown(resetsAt: number): string | null {
+	const remainingMs = resetsAt - Date.now();
+	if (remainingMs <= 0) return null;
+	const hours = Math.floor(remainingMs / 3600000);
+	const minutes = Math.floor((remainingMs % 3600000) / 60000);
+	return hours > 0 ? `↻${hours}h${minutes}m` : `↻${minutes}m`;
+}
+
 /**
  * Colorize OAuth provider utilization percentage based on utilization.
  * - 0-30%: green
@@ -34,31 +272,35 @@ function formatTokens(count: number): string {
  * - >= 70%: orange
  * - > 95%: red
  */
-function colorizeProviderUsagePercent(percentText: string, utilizationPercent: number): string {
+function colorizePercent(percentText: string, utilizationPercent: number): string {
 	if (utilizationPercent > 95) {
-		return theme.fg("error", percentText);
+		return red(percentText);
 	}
 	if (utilizationPercent >= 70) {
-		// Orange between warning and error (truecolor when available, fallback to ANSI-256 orange)
 		const orange = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;149;0m" : "\x1b[38;5;208m";
 		return `${orange}${percentText}\x1b[39m`;
 	}
 	if (utilizationPercent > 50) {
-		return theme.fg("warning", percentText);
+		return yellow(percentText);
 	}
 	if (utilizationPercent > 30) {
 		const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
 		return `${lightYellow}${percentText}\x1b[39m`;
 	}
-	return theme.fg("success", percentText);
+	return green(percentText);
 }
 
 /**
- * Footer component that shows pwd, token stats, and context usage.
- * Computes token/context stats from session, gets git branch and extension statuses from provider.
+ * Footer component that shows cwd/session/model on the first line, context/usage/cost on the second,
+ * token stats plus pi version on the third, and extension statuses below that.
  */
 export class FooterComponent implements Component {
+	private static readonly GIT_SUMMARY_TTL_MS = 1500;
+
 	private autoCompactEnabled = true;
+	private cachedGitSummary: GitSummary | null | undefined = undefined;
+	private cachedGitSummaryKey: string | undefined;
+	private cachedGitSummaryAt = 0;
 
 	constructor(
 		private session: AgentSession,
@@ -67,32 +309,47 @@ export class FooterComponent implements Component {
 
 	setSession(session: AgentSession): void {
 		this.session = session;
+		this.invalidate();
 	}
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.autoCompactEnabled = enabled;
 	}
 
-	/**
-	 * No-op: git branch caching now handled by provider.
-	 * Kept for compatibility with existing call sites in interactive-mode.
-	 */
 	invalidate(): void {
-		// No-op: git branch is cached/invalidated by provider
+		this.cachedGitSummary = undefined;
+		this.cachedGitSummaryKey = undefined;
+		this.cachedGitSummaryAt = 0;
 	}
 
-	/**
-	 * Clean up resources.
-	 * Git watcher cleanup now handled by provider.
-	 */
 	dispose(): void {
-		// Git watcher cleanup handled by provider
+		this.invalidate();
+	}
+
+	private getGitSummary(cwd: string, branch: string | null): GitSummary | null {
+		const cacheKey = `${cwd}\u0000${branch ?? ""}`;
+		const now = Date.now();
+		if (
+			this.cachedGitSummaryKey === cacheKey &&
+			this.cachedGitSummary !== undefined &&
+			now - this.cachedGitSummaryAt < FooterComponent.GIT_SUMMARY_TTL_MS
+		) {
+			return this.cachedGitSummary;
+		}
+
+		const summary = resolveGitSummary(cwd, branch);
+		this.cachedGitSummary = summary;
+		this.cachedGitSummaryKey = cacheKey;
+		this.cachedGitSummaryAt = now;
+		return summary;
 	}
 
 	render(width: number): string[] {
+		void this.autoCompactEnabled;
 		const state = this.session.state;
+		const separator = ` ${theme.fg("dim", "│")} `;
+		const label = (text: string): string => theme.fg("dim", `${text}:`);
 
-		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
 		let totalInput = 0;
 		let totalOutput = 0;
 		let totalCacheRead = 0;
@@ -109,44 +366,27 @@ export class FooterComponent implements Component {
 			}
 		}
 
-		// Calculate context usage from session.
-		// Right after compaction, measured usage can be unknown until the next assistant response;
-		// in that case, fall back to estimated usage for display.
 		const contextUsage = this.session.getContextUsage();
 		let contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
 		let contextPercentValue: number | null = contextUsage?.percent ?? null;
 		let usingEstimatedFallback = false;
 		if (contextPercentValue === null) {
 			const breakdown = this.session.getContextSourceBreakdown();
-			if (breakdown && breakdown.estimatedPercent !== null) {
+			if (breakdown?.estimatedPercent !== null && breakdown?.estimatedPercent !== undefined) {
 				contextPercentValue = breakdown.estimatedPercent;
 				contextWindow = breakdown.contextWindow;
 				usingEstimatedFallback = true;
 			}
 		}
-		const contextPercent = contextPercentValue !== null ? contextPercentValue.toFixed(1) : "?";
-		const numericContextPercent = contextPercentValue ?? 0;
 
-		// Replace home directory with ~
-		let pwd = this.session.sessionManager.getCwd();
-		const home = process.env.HOME || process.env.USERPROFILE;
-		if (home && pwd.startsWith(home)) {
-			pwd = `~${pwd.slice(home.length)}`;
-		}
-
-		// Add git branch if available
+		const cwd = this.session.sessionManager.getCwd();
+		const cwdBase = basename(cwd) || cwd;
 		const branch = this.footerData.getGitBranch();
-		if (branch) {
-			pwd = `${pwd} (${branch})`;
-		}
-
-		// Add session id and name
+		const gitSummary = this.getGitSummary(cwd, branch);
 		const sessionId = this.session.sessionManager.getSessionId();
 		const sessionName = this.session.sessionManager.getSessionName();
 		const shortSessionId = sessionId.slice(0, 8);
-		pwd = sessionName ? `${pwd} • ${sessionName} (${shortSessionId})` : `${pwd} • ${shortSessionId}`;
 
-		// Build model info for right side: provider + model + thinking level
 		const modelName = state.model?.id || "no-model";
 		let modelInfoWithoutProvider = modelName;
 		if (state.model?.reasoning) {
@@ -154,57 +394,44 @@ export class FooterComponent implements Component {
 			modelInfoWithoutProvider =
 				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
 		}
+		const modelInfo = state.model
+			? `${theme.fg("dim", `(${state.model.provider})`)} ${white(modelInfoWithoutProvider)}`
+			: white(modelInfoWithoutProvider);
 
-		let modelInfo = modelInfoWithoutProvider;
-		if (state.model) {
-			modelInfo = `(${state.model.provider}) ${modelInfoWithoutProvider}`;
-		}
+		let cwdValue = white(cwdBase);
+		if (gitSummary?.branch) {
+			cwdValue += white(` (${gitSummary.branch})`);
 
-		// First line: pwd/session on the left, model info on the right.
-		let pwdLeft = pwd;
-		const minPadding = 2;
-		const modelInfoWidth = visibleWidth(modelInfo);
-		if (modelInfoWidth + minPadding <= width) {
-			const availableForLeft = width - minPadding - modelInfoWidth;
-			if (visibleWidth(pwdLeft) > availableForLeft) {
-				pwdLeft = truncateToWidth(pwdLeft, availableForLeft, "...");
+			const gitParts: string[] = [];
+			if (gitSummary.linesAdded > 0 || gitSummary.linesRemoved > 0) {
+				gitParts.push(`${green(`+${gitSummary.linesAdded}`)}/${red(`-${gitSummary.linesRemoved}`)}`);
 			}
-			const leftWidth = visibleWidth(pwdLeft);
-			const padding = " ".repeat(Math.max(minPadding, width - leftWidth - modelInfoWidth));
-			pwd = `${pwdLeft}${padding}${modelInfo}`;
-		} else {
-			// Very narrow terminal: prioritize showing model info.
-			pwd = truncateToWidth(modelInfo, width, "");
+			if (gitSummary.syncStatus) {
+				gitParts.push(theme.fg("dim", gitSummary.syncStatus));
+			}
+			if (gitParts.length > 0) {
+				cwdValue += ` ${gitParts.join(" ")}`;
+			}
 		}
+		const cwdSegment = `${label("CWD")}${cwdValue}`;
 
-		// Colorize context percentage based on usage.
-		// Keep this first in the stats line so it remains visible when space is tight.
-		let contextPercentStr: string;
-		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
+		const sessionValue = sessionName ? white(`${sessionName} (${shortSessionId})`) : white(shortSessionId);
+		const sessionSegment = `${label("SESH")}${sessionValue}`;
+
+		const line1Left = joinSegments([cwdSegment, sessionSegment], separator);
+
+		const clampedContextPercent = Math.max(0, Math.min(100, contextPercentValue ?? 0));
+		const contextPercentText =
+			contextPercentValue === null
+				? "?"
+				: `${usingEstimatedFallback ? "~" : ""}${Math.floor(clampedContextPercent)}%`;
 		const contextPercentDisplay =
-			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${usingEstimatedFallback ? "~" : ""}${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
-		if (contextPercent === "?") {
-			contextPercentStr = contextPercentDisplay;
-		} else if (numericContextPercent > 90) {
-			contextPercentStr = theme.fg("error", contextPercentDisplay);
-		} else if (numericContextPercent > 70) {
-			contextPercentStr = theme.fg("warning", contextPercentDisplay);
-		} else if (numericContextPercent > 50) {
-			contextPercentStr = contextPercentDisplay;
-		} else if (numericContextPercent > 30) {
-			const lightYellow = theme.getColorMode() === "truecolor" ? "\x1b[38;2;255;245;157m" : "\x1b[38;5;229m";
-			contextPercentStr = `${lightYellow}${contextPercentDisplay}\x1b[39m`;
-		} else {
-			contextPercentStr = theme.fg("success", contextPercentDisplay);
-		}
+			contextPercentValue === null
+				? theme.fg("dim", contextPercentText)
+				: colorizePercent(contextPercentText, clampedContextPercent);
+		const contextSegment = `${label("Ctx")}${buildContextBar(clampedContextPercent)} ${contextPercentDisplay} ${theme.fg("dim", `of ${formatTokens(contextWindow)}`)}`;
 
-		// Build stats line
-		const statsParts = [contextPercentStr];
-
-		// Show usage for the current model's OAuth provider only (e.g. Anthropic).
-		// Render all known windows, sorted by soonest reset, in the form: 23%/5h 61%/7d  reset 3h11m
+		let usageSegment: string | undefined;
 		const currentProvider = state.model?.provider;
 		const providerUsage = this.footerData.getProviderUsage();
 		const currentUsage = currentProvider ? providerUsage.get(currentProvider) : undefined;
@@ -215,65 +442,63 @@ export class FooterComponent implements Component {
 				if (resetA !== resetB) return resetA - resetB;
 				return a[0].localeCompare(b[0]);
 			});
+
 			if (windows.length > 0) {
 				const usageParts = windows.map(([windowName, window]) => {
-					const pct = Math.round(window.utilizationPercent);
-					const coloredPct = colorizeProviderUsagePercent(`${pct}%`, window.utilizationPercent);
-					return `${coloredPct}/${windowName}`;
+					const percentText = colorizePercent(
+						`${Math.round(window.utilizationPercent)}%`,
+						window.utilizationPercent,
+					);
+					return `${percentText}${theme.fg("dim", `/${windowName}`)}`;
 				});
 
-				const withReset = [...windows]
-					.map(([, window]) => window)
-					.filter((window) => window.resetsAt !== undefined)
-					.sort((a, b) => (a.resetsAt! < b.resetsAt! ? -1 : 1));
-				const soonestReset = withReset[0];
-
-				let usageSummary = usageParts.join(" ");
-				if (soonestReset?.resetsAt !== undefined) {
-					const remainingMs = soonestReset.resetsAt - Date.now();
-					if (remainingMs > 0) {
-						const h = Math.floor(remainingMs / 3600000);
-						const m = Math.floor((remainingMs % 3600000) / 60000);
-						const resetText = h > 0 ? `reset ${h}h${m}m` : `reset ${m}m`;
-						usageSummary += `  ${resetText}`;
-					}
-				}
-
-				statsParts.push(usageSummary);
+				const soonestReset = windows
+					.map(([, window]) => window.resetsAt)
+					.filter((resetsAt): resetsAt is number => resetsAt !== undefined)
+					.sort((a, b) => a - b)[0];
+				const resetText = soonestReset !== undefined ? formatResetCountdown(soonestReset) : null;
+				const usageValue = `${usageParts.join(" ")}${resetText ? ` ${theme.fg("dim", resetText)}` : ""}`;
+				usageSegment = `${label("Use")}${usageValue}`;
 			}
 		}
 
-		if (totalInput) statsParts.push(`in ${formatTokens(totalInput)}`);
-		if (totalOutput) statsParts.push(`out ${formatTokens(totalOutput)}`);
-		if (totalCacheRead || totalCacheWrite) {
-			statsParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
-		}
+		const line1LeftSection = joinSegments([line1Left, modelInfo], separator);
+		const line1RightSection = usageSegment ?? "";
+		const line1 = line1RightSection
+			? fitLeftAndRight(line1LeftSection, line1RightSection, width, separator)
+			: line1LeftSection;
 
-		// Show cost with "(sub)" indicator if using OAuth subscription
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
-		if (totalCost || usingSubscription) {
-			statsParts.push(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`);
+		const costValue = `${theme.fg("dim", formatCost(totalCost))}${usingSubscription ? theme.fg("dim", " (sub)") : ""}`;
+		const costSegment = `${label("Cost")}${costValue}`;
+		const line2 = truncateToWidth(
+			joinSegments([contextSegment, costSegment], separator),
+			width,
+			theme.fg("dim", "..."),
+		);
+
+		const tokenParts: string[] = [];
+		if (totalInput) tokenParts.push(`in ${formatTokens(totalInput)}`);
+		if (totalOutput) tokenParts.push(`out ${formatTokens(totalOutput)}`);
+		if (totalCacheRead || totalCacheWrite) {
+			tokenParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
+		}
+		const tokensSegment = tokenParts.length > 0 ? `${label("Tokens")}${theme.fg("dim", tokenParts.join(" "))}` : "";
+		const piVersionDisplay = getPiVersionDisplay();
+		const piSegment = piVersionDisplay ? `${label("Pi")}${theme.fg("dim", piVersionDisplay)}` : "";
+		const line3 = fitLeftAndRight(tokensSegment, piSegment, width, separator);
+
+		const lines = [line1, line2];
+		if (line3) {
+			lines.push(line3);
 		}
 
-		let statsLeft = statsParts.join(" ");
-		if (visibleWidth(statsLeft) > width) {
-			statsLeft = truncateToWidth(statsLeft, width, "...");
-		}
-
-		// Apply dim to the stats line. statsLeft may include colorized context/usage segments.
-		const dimStatsLeft = theme.fg("dim", statsLeft);
-
-		const pwdLine = theme.fg("dim", pwd);
-		const lines = [pwdLine, dimStatsLeft];
-
-		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();
 		if (extensionStatuses.size > 0) {
 			const sortedStatuses = Array.from(extensionStatuses.entries())
 				.sort(([a], [b]) => a.localeCompare(b))
 				.map(([, text]) => sanitizeStatusText(text));
 			const statusLine = sortedStatuses.join(" ");
-			// Truncate to terminal width with dim ellipsis for consistency with footer style
 			lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
 		}
 
