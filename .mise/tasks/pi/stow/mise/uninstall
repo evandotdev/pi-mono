@@ -20,20 +20,59 @@ if [[ -d "${STOW_ROOT}/${PACKAGE_NAME}" ]]; then
   stow --dir "${STOW_ROOT}" --target "${TARGET_ROOT}" -D --no-folding "${PACKAGE_NAME}"
 fi
 
+hash_path() {
+  local target_path="$1"
+
+  DEST_PATH="${target_path}" node - <<'NODE'
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+
+const targetPath = process.env.DEST_PATH;
+const stats = fs.lstatSync(targetPath);
+if (stats.isDirectory()) {
+  process.exit(1);
+}
+
+const data = fs.readFileSync(targetPath);
+process.stdout.write(crypto.createHash("sha256").update(data).digest("hex"));
+NODE
+}
+
 restored_count=0
+removed_managed_sandbox_config=0
+skipped_modified_sandbox_config=0
 if [[ -f "${MANIFEST_PATH}" ]]; then
   timestamp=""
+  sandbox_config_managed="0"
+  sandbox_config_rel=""
+  sandbox_config_sha256=""
+
   while IFS= read -r line; do
-    if [[ "${line}" == timestamp=* ]]; then
-      timestamp="${line#timestamp=}"
-      break
-    fi
+    case "${line}" in
+      timestamp=*)
+        timestamp="${line#timestamp=}"
+        ;;
+      meta:sandbox_config_managed=*)
+        sandbox_config_managed="${line#meta:sandbox_config_managed=}"
+        ;;
+      meta:sandbox_config_rel=*)
+        sandbox_config_rel="${line#meta:sandbox_config_rel=}"
+        ;;
+      meta:sandbox_config_sha256=*)
+        sandbox_config_sha256="${line#meta:sandbox_config_sha256=}"
+        ;;
+    esac
   done < "${MANIFEST_PATH}"
 
   if [[ -n "${timestamp}" && -d "${BACKUP_ROOT}/${timestamp}" ]]; then
     while IFS= read -r rel; do
       [[ -z "${rel}" ]] && continue
-      [[ "${rel}" == timestamp=* ]] && continue
+
+      case "${rel}" in
+        timestamp=*|meta:*)
+          continue
+          ;;
+      esac
 
       backup_path="${BACKUP_ROOT}/${timestamp}/${rel}"
       dest="${TARGET_ROOT}/${rel}"
@@ -51,10 +90,38 @@ if [[ -f "${MANIFEST_PATH}" ]]; then
     done < "${MANIFEST_PATH}"
   fi
 
+  if [[ "${sandbox_config_managed}" == "1" && -n "${sandbox_config_rel}" && -n "${sandbox_config_sha256}" ]]; then
+    backup_path="${BACKUP_ROOT}/${timestamp}/${sandbox_config_rel}"
+    dest="${TARGET_ROOT}/${sandbox_config_rel}"
+
+    if [[ -e "${dest}" || -L "${dest}" ]]; then
+      current_sha=""
+      if current_sha="$(hash_path "${dest}" 2>/dev/null)" && [[ "${current_sha}" == "${sandbox_config_sha256}" ]]; then
+        if [[ -e "${backup_path}" || -L "${backup_path}" ]]; then
+          rm -rf "${dest}"
+          mkdir -p "$(dirname "${dest}")"
+          mv "${backup_path}" "${dest}"
+          restored_count=$((restored_count + 1))
+        else
+          rm -rf "${dest}"
+          removed_managed_sandbox_config=$((removed_managed_sandbox_config + 1))
+        fi
+      else
+        skipped_modified_sandbox_config=$((skipped_modified_sandbox_config + 1))
+      fi
+    elif [[ -e "${backup_path}" || -L "${backup_path}" ]]; then
+      mkdir -p "$(dirname "${dest}")"
+      mv "${backup_path}" "${dest}"
+      restored_count=$((restored_count + 1))
+    fi
+  fi
+
   rm -f "${MANIFEST_PATH}"
 fi
 
 cat <<EOF
 pi:stow:mise:uninstall completed
   restored backups: ${restored_count}
+  removed managed sandbox config: ${removed_managed_sandbox_config}
+  skipped modified sandbox config: ${skipped_modified_sandbox_config}
 EOF

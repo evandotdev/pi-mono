@@ -42,6 +42,7 @@
 
 ### Fixed
 
+- Fixed `pi:stow:mise:install` to also manage a global sandbox gitconfig override so `mise run pi` works from other repositories without requiring a host `~/.gitconfig`.
 - Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
 - Fixed Alt keybindings inside Zellij by skipping the Kitty keyboard protocol query there and enabling xterm `modifyOtherKeys` mode 2 directly ([#3163](https://github.com/badlogic/pi-mono/issues/3163))
 - Fixed `/scoped-models` reordering to propagate into the `/model` scoped tab, preserving the user-defined scoped model order instead of re-sorting it ([#3217](https://github.com/badlogic/pi-mono/issues/3217))

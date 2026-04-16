@@ -155,7 +155,7 @@ mise run pi:stow:install
 What these do:
 
 - `mise trust` allows mise to use this repo's task configuration.
-- `pi:stow:mise:install` stows global `mise` task wrappers so `mise run pi` works from any directory.
+- `pi:stow:mise:install` stows global `mise` task wrappers so `mise run pi` works from any directory, and writes `~/.pi/agent/extensions/docker-sandbox.json` to point sandbox gitconfig at this checkout's `.pi/gitconfig`.
 - `pi:stow:install` symlinks the repo's `.pi` resources into `~/.pi`.
 
 Sandbox git config:
@@ -169,6 +169,8 @@ To remove those global task symlinks later:
 ```bash
 mise run pi:stow:mise:uninstall
 ```
+
+`pi:stow:mise:uninstall` also removes or restores the managed `~/.pi/agent/extensions/docker-sandbox.json` override when it still matches the installed content.
 
 Global wrappers default to `~/pi-mono`. If your checkout lives elsewhere, set `PI_MONO_ROOT`.
 

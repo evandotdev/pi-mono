@@ -10,7 +10,11 @@ TARGET_ROOT="${HOME}"
 MISE_CONFIG_DIR="${HOME}/.config/mise"
 BACKUP_ROOT="${MISE_CONFIG_DIR}/.pi-mono-stow-backups/mise"
 MANIFEST_PATH="${MISE_CONFIG_DIR}/.pi-mono-stow-manifest-mise"
-TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+SANDBOX_CONFIG_REL=".pi/agent/extensions/docker-sandbox.json"
+SANDBOX_CONFIG_PATH="${TARGET_ROOT}/${SANDBOX_CONFIG_REL}"
+REPO_GITCONFIG_PATH="${REPO_ROOT}/.pi/gitconfig"
+RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
+TIMESTAMP="${RUN_ID%%-*}"
 
 if ! command -v stow >/dev/null 2>&1; then
   echo "pi:stow:mise:install: 'stow' is not installed." >&2
@@ -23,15 +27,53 @@ if [[ ! -d "${PACKAGE_ROOT}" ]]; then
   exit 1
 fi
 
+existing_timestamp=""
+existing_sandbox_config_managed="0"
+if [[ -f "${MANIFEST_PATH}" ]]; then
+  while IFS= read -r line; do
+    case "${line}" in
+      timestamp=*)
+        existing_timestamp="${line#timestamp=}"
+        ;;
+      meta:sandbox_config_managed=*)
+        existing_sandbox_config_managed="${line#meta:sandbox_config_managed=}"
+        ;;
+    esac
+  done < "${MANIFEST_PATH}"
+fi
+
 mkdir -p "${MISE_CONFIG_DIR}"
 mkdir -p "${BACKUP_ROOT}/${TIMESTAMP}"
+if [[ -n "${existing_timestamp}" && "${existing_timestamp}" != "${TIMESTAMP}" && -d "${BACKUP_ROOT}/${existing_timestamp}" ]]; then
+  cp -a "${BACKUP_ROOT}/${existing_timestamp}/." "${BACKUP_ROOT}/${TIMESTAMP}/"
+fi
 
 TMP_MANIFEST="$(mktemp)"
-trap 'rm -f "${TMP_MANIFEST}"' EXIT
+TMP_SANDBOX_CONFIG="$(mktemp)"
+TMP_SANDBOX_SHA="$(mktemp)"
+trap 'rm -f "${TMP_MANIFEST}" "${TMP_SANDBOX_CONFIG}" "${TMP_SANDBOX_SHA}"' EXIT
+
+allocate_backup_path() {
+  local base_path="$1"
+  local candidate="${base_path}"
+  local counter=2
+
+  while [[ -e "${candidate}" || -L "${candidate}" ]]; do
+    candidate="${base_path}.reinstall-${RUN_ID}-${counter}"
+    counter=$((counter + 1))
+  done
+
+  printf '%s\n' "${candidate}"
+}
 
 linked_count=0
 already_linked_count=0
 backed_up_count=0
+sandbox_config_written=0
+sandbox_config_already_configured=0
+sandbox_config_backed_up=0
+sandbox_config_managed="${existing_sandbox_config_managed}"
+sandbox_config_sha256=""
 
 while IFS= read -r -d '' src; do
   rel="${src#"${PACKAGE_ROOT}/"}"
@@ -44,7 +86,7 @@ while IFS= read -r -d '' src; do
   fi
 
   if [[ -e "${dest}" || -L "${dest}" ]]; then
-    backup_path="${BACKUP_ROOT}/${TIMESTAMP}/${rel}"
+    backup_path="$(allocate_backup_path "${BACKUP_ROOT}/${TIMESTAMP}/${rel}")"
     mkdir -p "$(dirname "${backup_path}")"
     mv "${dest}" "${backup_path}"
     backed_up_count=$((backed_up_count + 1))
@@ -56,8 +98,71 @@ done < <(find "${PACKAGE_ROOT}" \( -type f -o -type l \) -print0 | sort -z)
 
 stow --dir "${STOW_ROOT}" --target "${TARGET_ROOT}" --restow --no-folding "${PACKAGE_NAME}"
 
+if [[ -e "${REPO_GITCONFIG_PATH}" ]]; then
+  mkdir -p "$(dirname "${SANDBOX_CONFIG_PATH}")"
+  REPO_GITCONFIG_REALPATH="$(cd "$(dirname "${REPO_GITCONFIG_PATH}")" && pwd -P)/$(basename "${REPO_GITCONFIG_PATH}")"
+
+  SANDBOX_CONFIG_PATH="${SANDBOX_CONFIG_PATH}" REPO_GITCONFIG_REALPATH="${REPO_GITCONFIG_REALPATH}" \
+    node - "${TMP_SANDBOX_CONFIG}" "${TMP_SANDBOX_SHA}" <<'NODE'
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+
+const [configOutputPath, hashOutputPath] = process.argv.slice(2);
+const configPath = process.env.SANDBOX_CONFIG_PATH;
+const gitconfigPath = process.env.REPO_GITCONFIG_REALPATH;
+
+let config = {};
+if (configPath && fs.existsSync(configPath)) {
+  try {
+    const raw = fs.readFileSync(configPath, "utf8").trim();
+    if (raw.length > 0) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        config = parsed;
+      }
+    }
+  } catch {
+    config = {};
+  }
+}
+
+config.gitconfig = gitconfigPath;
+const content = `${JSON.stringify(config, null, 2)}\n`;
+fs.writeFileSync(configOutputPath, content);
+fs.writeFileSync(hashOutputPath, crypto.createHash("sha256").update(content).digest("hex"));
+NODE
+
+  sandbox_config_sha256="$(<"${TMP_SANDBOX_SHA}")"
+
+  if [[ -e "${SANDBOX_CONFIG_PATH}" || -L "${SANDBOX_CONFIG_PATH}" ]]; then
+    if cmp -s "${TMP_SANDBOX_CONFIG}" "${SANDBOX_CONFIG_PATH}"; then
+      sandbox_config_already_configured=1
+      sandbox_config_managed="${existing_sandbox_config_managed}"
+    else
+      backup_path="$(allocate_backup_path "${BACKUP_ROOT}/${TIMESTAMP}/${SANDBOX_CONFIG_REL}")"
+      mkdir -p "$(dirname "${backup_path}")"
+      mv "${SANDBOX_CONFIG_PATH}" "${backup_path}"
+      sandbox_config_backed_up=1
+      mv "${TMP_SANDBOX_CONFIG}" "${SANDBOX_CONFIG_PATH}"
+      sandbox_config_written=1
+      sandbox_config_managed="1"
+    fi
+  else
+    mv "${TMP_SANDBOX_CONFIG}" "${SANDBOX_CONFIG_PATH}"
+    sandbox_config_written=1
+    sandbox_config_managed="1"
+  fi
+else
+  echo "pi:stow:mise:install: warning: repo gitconfig not found: ${REPO_GITCONFIG_PATH}" >&2
+fi
+
 {
   printf 'timestamp=%s\n' "${TIMESTAMP}"
+  if [[ "${sandbox_config_managed}" == "1" && -n "${sandbox_config_sha256}" ]]; then
+    printf 'meta:sandbox_config_managed=1\n'
+    printf 'meta:sandbox_config_rel=%s\n' "${SANDBOX_CONFIG_REL}"
+    printf 'meta:sandbox_config_sha256=%s\n' "${sandbox_config_sha256}"
+  fi
   cat "${TMP_MANIFEST}"
 } > "${MANIFEST_PATH}"
 
@@ -66,6 +171,9 @@ pi:stow:mise:install completed
   linked: ${linked_count}
   already linked: ${already_linked_count}
   backed up: ${backed_up_count}
+  sandbox config written: ${sandbox_config_written}
+  sandbox config already configured: ${sandbox_config_already_configured}
+  sandbox config backed up: ${sandbox_config_backed_up}
   manifest: ${MANIFEST_PATH}
   backups: ${BACKUP_ROOT}/${TIMESTAMP}
 EOF
