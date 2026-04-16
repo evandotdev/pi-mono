@@ -628,7 +628,7 @@ mise run pi:stow:mise:uninstall
 
 Global wrappers default to `~/pi-mono`. If your checkout lives elsewhere, set `PI_MONO_ROOT`.
 
-In this fork, the bundled sandbox extension also adds `/sandbox` to show sandbox status and mount verification details. The `mise run pi*` wrappers accept repeated `-v/--volume` folder mounts for extra sandbox paths, resolved from the launch directory (for example, `mise run pi -v ~/projects/docs -v ../shared`); use `pi --version` directly if you need the CLI version flag.
+In this fork, the bundled sandbox extension also adds `/sandbox` to show sandbox status, host-to-container mount mappings, and mount verification details. The `mise run pi` wrappers accept repeated `-v/--volume` folder mounts for extra sandbox paths, resolved from the launch directory and mounted as siblings under `/home/pisandbox` (for example, `mise run pi -v ~/projects/docs -v ../shared`).
 
 ---
 

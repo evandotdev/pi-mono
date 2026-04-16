@@ -8,7 +8,7 @@
 - Multi-account OAuth flow and load balancing, including account selection during model switches and retry-time credential rotation on rate-limit/overload failures.
 - New interactive slash command capabilities: `/thinking`, `/context`, `/model list`, and `/generate-models`.
 - Namespaced command groups for sessions and prompts, with canonical forms (`/session:*`, `/prompt:*`) and backward-compatible short aliases.
-- Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command, local sandbox image tooling, and `-v <folder>` overrides for extra sandbox mounts.
+- Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command with host-to-container mount mappings, local sandbox image tooling, and `-v <folder>` overrides for extra sandbox mounts under `/home/pisandbox`.
 - Stow-based machine setup automation for repo `.pi` resources and global `mise` task wrappers.
 - Current fork resources include `plan-mode/`, the `commit` and `security` skills, and bundled extensions `grep-home-shorten.ts`, `guardrails.ts`, `prompt-url-widget.ts`, `redraws.ts`, `sandbox.ts`, and `tps.ts`.
 - Legacy bundled `diff.ts` and `files.ts` extensions were removed from `.pi/extensions`.

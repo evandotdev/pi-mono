@@ -3,7 +3,7 @@ FROM node:24-alpine3.22
 
 USER root
 
-WORKDIR /opt/pi-mono
+WORKDIR /home/pisandbox/pi-mono
 
 RUN apk add --no-cache \
 	bash \
@@ -27,4 +27,4 @@ RUN npm --workspace packages/tui run build \
 	&& npm --workspace packages/agent run build \
 	&& npm --workspace packages/coding-agent run build
 
-ENTRYPOINT ["/opt/pi-mono/packages/coding-agent/dist/cli.js"]
+ENTRYPOINT ["/home/pisandbox/pi-mono/packages/coding-agent/dist/cli.js"]

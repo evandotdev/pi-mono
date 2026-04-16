@@ -3,6 +3,11 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 
+interface SandboxMount {
+	hostPath: string;
+	containerPath: string;
+}
+
 interface SandboxSnapshot {
 	enabled: boolean;
 	status: "enabled" | "disabled";
@@ -11,6 +16,7 @@ interface SandboxSnapshot {
 	image: string;
 	network: string;
 	folders: string[];
+	mounts: SandboxMount[];
 	reason?: string;
 	launcher?: string;
 }
@@ -24,12 +30,30 @@ function parseEnvBoolean(value: string | undefined): boolean {
 function parseFolders(value: string | undefined, fallback: string): string[] {
 	if (!value) return [fallback];
 	try {
-		const parsed = JSON.parse(value) as unknown;
+		const parsed: unknown = JSON.parse(value);
 		if (!Array.isArray(parsed)) return [fallback];
 		const folders = parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 		return folders.length > 0 ? folders : [fallback];
 	} catch {
 		return [fallback];
+	}
+}
+
+function isSandboxMount(value: unknown): value is SandboxMount {
+	if (typeof value !== "object" || value === null) return false;
+	const record = value as Record<string, unknown>;
+	return typeof record.hostPath === "string" && typeof record.containerPath === "string";
+}
+
+function parseMounts(value: string | undefined): SandboxMount[] {
+	if (!value) return [];
+	try {
+		const parsed: unknown = JSON.parse(value);
+		if (!Array.isArray(parsed)) return [];
+		const mounts = parsed.filter(isSandboxMount);
+		return mounts.length > 0 ? mounts : [];
+	} catch {
+		return [];
 	}
 }
 
@@ -42,6 +66,7 @@ function readSnapshot(cwd: string): SandboxSnapshot {
 	const launcher = process.env.PI_SANDBOX_LAUNCHER;
 	const reason = process.env.PI_SANDBOX_REASON;
 	const folders = parseFolders(process.env.PI_SANDBOX_FOLDERS, cwd);
+	const mounts = parseMounts(process.env.PI_SANDBOX_MOUNTS);
 
 	return {
 		enabled,
@@ -51,6 +76,7 @@ function readSnapshot(cwd: string): SandboxSnapshot {
 		image,
 		network,
 		folders,
+		mounts,
 		reason,
 		launcher,
 	};
@@ -68,9 +94,16 @@ function formatSnapshot(snapshot: SandboxSnapshot): string {
 	if (snapshot.reason) lines.push(`  Reason: ${snapshot.reason}`);
 	if (snapshot.launcher) lines.push(`  Launcher: ${snapshot.launcher}`);
 
-	lines.push("  Sandbox folders:");
-	for (const folder of snapshot.folders) {
-		lines.push(`    - ${folder}`);
+	if (snapshot.mounts.length > 0) {
+		lines.push("  Sandbox mounts:");
+		for (const mount of snapshot.mounts) {
+			lines.push(`    - ${mount.hostPath} -> ${mount.containerPath}`);
+		}
+	} else {
+		lines.push("  Sandbox folders:");
+		for (const folder of snapshot.folders) {
+			lines.push(`    - ${folder}`);
+		}
 	}
 
 	return lines.join("\n");
@@ -153,9 +186,11 @@ export default function (pi: ExtensionAPI) {
 	const publishStartupStatus = (ctx: ExtensionContext) => {
 		const level = snapshot.enabled ? "info" : "warning";
 		if (snapshot.enabled) {
+			const mountCount = snapshot.mounts.length > 0 ? snapshot.mounts.length : snapshot.folders.length;
+			const mountLabel = snapshot.mounts.length > 0 ? "mounts" : "folders";
 			ctx.ui.setStatus(
 				"sandbox",
-				ctx.ui.theme.fg("accent", `sandbox: ${snapshot.image} (${snapshot.folders.length} folders)`),
+				ctx.ui.theme.fg("accent", `sandbox: ${snapshot.image} (${mountCount} ${mountLabel})`),
 			);
 		} else {
 			ctx.ui.setStatus("sandbox", undefined);
@@ -173,7 +208,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("sandbox", {
-		description: "Show Docker sandbox status, folders, and mount/resource checks",
+		description: "Show Docker sandbox status, mount mappings, and resource checks",
 		handler: async (_args, ctx) => {
 			snapshot = readSnapshot(ctx.cwd);
 			const projectPiRoot = findNearestProjectPiRoot(ctx.cwd);

@@ -74,7 +74,7 @@ const NETWORK_MODES = new Set(["none", "bridge", "host"]);
 const CONTAINER_HOME = "/home/pisandbox";
 const CONTAINER_AGENT_DIR = `${CONTAINER_HOME}/.pi/agent`;
 const CONTAINER_AGENTS_SKILLS_DIR = `${CONTAINER_HOME}/.agents/skills`;
-const CONTAINER_REPO_ROOT = "/opt/pi-mono";
+const RESERVED_CONTAINER_NAMES = new Set([".pi", ".agents", ".gitconfig"]);
 
 function normalizeSandboxMode(value) {
 	if (!value) return "pi";
@@ -293,28 +293,28 @@ function sanitizeFolderName(name) {
 	return sanitized.length > 0 ? sanitized : "folder";
 }
 
+function allocateContainerName(seed, usedNames) {
+	let folderName = seed;
+	let suffix = 2;
+	while (usedNames.has(folderName) || RESERVED_CONTAINER_NAMES.has(folderName)) {
+		folderName = `${seed}-${suffix}`;
+		suffix += 1;
+	}
+	usedNames.add(folderName);
+	return folderName;
+}
+
 function buildMounts(folders) {
 	const usedNames = new Set();
-	return folders.map((hostPath) => {
-		if (hostPath === repoRoot) {
-			return {
-				hostPath,
-				containerPath: CONTAINER_REPO_ROOT,
-			};
-		}
+	const repoMountName = allocateContainerName(sanitizeFolderName(path.basename(repoRoot) || "root"), usedNames);
 
+	return folders.map((hostPath) => {
 		const base = path.basename(hostPath);
 		const seed = sanitizeFolderName(base === path.sep || base === "" ? "root" : base);
-		let folderName = seed;
-		let suffix = 2;
-		while (usedNames.has(folderName)) {
-			folderName = `${seed}-${suffix}`;
-			suffix += 1;
-		}
-		usedNames.add(folderName);
+		const folderName = hostPath === repoRoot ? repoMountName : allocateContainerName(seed, usedNames);
 		return {
 			hostPath,
-			containerPath: `/home/pisandbox/${folderName}`,
+			containerPath: `${CONTAINER_HOME}/${folderName}`,
 		};
 	});
 }
@@ -476,6 +476,7 @@ function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCw
 	dockerArgs.push("--env", `PI_SANDBOX_IMAGE=${image}`);
 	dockerArgs.push("--env", `PI_SANDBOX_NETWORK=${config.network}`);
 	dockerArgs.push("--env", `PI_SANDBOX_FOLDERS=${JSON.stringify(folders)}`);
+	dockerArgs.push("--env", `PI_SANDBOX_MOUNTS=${JSON.stringify(mounts)}`);
 	dockerArgs.push("--env", `PI_SANDBOX_CONTAINER_CWD=${containerCwd}`);
 	dockerArgs.push("--env", "PI_SANDBOX_LAUNCHER=scripts/pi-sandbox.sh");
 	dockerArgs.push("--env", `HOME=${CONTAINER_HOME}`);
