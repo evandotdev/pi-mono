@@ -4,4 +4,39 @@
 #MISE dir="{{cwd}}"
 set -euo pipefail
 
-PI_SANDBOX_LAUNCH_MODE=readonly "${MISE_PROJECT_ROOT}/scripts/pi-sandbox.sh" "$@"
+project_root="$(cd "${MISE_PROJECT_ROOT}" && pwd -P)"
+cwd="$(pwd -P)"
+needs_project_resource_flags=false
+if [[ "$cwd" == "$project_root/"* ]]; then
+  if [[ "$cwd" != "$project_root" ]]; then
+    needs_project_resource_flags=true
+  fi
+else
+  cd "$project_root"
+  cwd="$project_root"
+fi
+
+args=()
+
+if [[ "$needs_project_resource_flags" == "true" ]]; then
+  project_pi_relative="$(node -e 'const path = require("node:path"); process.stdout.write(path.relative(process.argv[1], process.argv[2]));' "$cwd" "$project_root/.pi")"
+
+  if [[ -d "$project_root/.pi/extensions" ]]; then
+    shopt -s nullglob
+    for extension in "$project_root/.pi/extensions"/*.ts "$project_root/.pi/extensions"/*.js; do
+      args+=(--extension "${project_pi_relative}/extensions/$(basename "$extension")")
+    done
+    for extension in "$project_root/.pi/extensions"/*/index.ts "$project_root/.pi/extensions"/*/index.js; do
+      relative_extension="${extension#"$project_root/.pi/"}"
+      args+=(--extension "${project_pi_relative}/${relative_extension}")
+    done
+    shopt -u nullglob
+  fi
+
+  [[ -d "$project_root/.pi/skills" ]] && args+=(--skill "${project_pi_relative}/skills")
+  [[ -d "$project_root/.pi/prompts" ]] && args+=(--prompt-template "${project_pi_relative}/prompts")
+fi
+
+args+=("$@")
+
+PI_SANDBOX_LAUNCH_MODE=readonly "${MISE_PROJECT_ROOT}/scripts/pi-sandbox.sh" "${args[@]}"

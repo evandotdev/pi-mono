@@ -59,4 +59,35 @@ if [[ ! -x "$TSX_BIN" ]]; then
   exit 1
 fi
 
-"$TSX_BIN" "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}
+cwd="$(pwd -P)"
+needs_project_resource_flags=false
+if [[ "$cwd" == "$SCRIPT_DIR/"* ]]; then
+  if [[ "$cwd" != "$SCRIPT_DIR" ]]; then
+    needs_project_resource_flags=true
+  fi
+else
+  cd "$SCRIPT_DIR"
+  cwd="$SCRIPT_DIR"
+fi
+
+resource_args=()
+if [[ "$needs_project_resource_flags" == "true" ]]; then
+  project_pi_relative="$(node -e 'const path = require("node:path"); process.stdout.write(path.relative(process.argv[1], process.argv[2]));' "$cwd" "$SCRIPT_DIR/.pi")"
+
+  if [[ -d "$SCRIPT_DIR/.pi/extensions" ]]; then
+    shopt -s nullglob
+    for extension in "$SCRIPT_DIR/.pi/extensions"/*.ts "$SCRIPT_DIR/.pi/extensions"/*.js; do
+      resource_args+=(--extension "${project_pi_relative}/extensions/$(basename "$extension")")
+    done
+    for extension in "$SCRIPT_DIR/.pi/extensions"/*/index.ts "$SCRIPT_DIR/.pi/extensions"/*/index.js; do
+      relative_extension="${extension#"$SCRIPT_DIR/.pi/"}"
+      resource_args+=(--extension "${project_pi_relative}/${relative_extension}")
+    done
+    shopt -u nullglob
+  fi
+
+  [[ -d "$SCRIPT_DIR/.pi/skills" ]] && resource_args+=(--skill "${project_pi_relative}/skills")
+  [[ -d "$SCRIPT_DIR/.pi/prompts" ]] && resource_args+=(--prompt-template "${project_pi_relative}/prompts")
+fi
+
+"$TSX_BIN" "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" "${resource_args[@]}" ${ARGS[@]+"${ARGS[@]}"}
