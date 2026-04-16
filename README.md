@@ -64,7 +64,7 @@ I regularly publish my own `pi-mono` work sessions here:
   - `/login` shows per-account usage metrics to make account switching explicit
 
 - Docker sandbox workflows
-  - repeated `-v/--volume` folder mounts for extra sandbox paths, resolved from the launch directory
+  - repeated `-d/--directory` mounts for extra sandbox paths, resolved from the launch directory
   - monorepo `mise` tasks (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`)
   - `/sandbox` status + verification command from the bundled sandbox extension
   - local sandbox image build/tag scripts under `scripts/pi-sandbox*`
@@ -129,10 +129,10 @@ mise run pi:readonly       # Read-only sandbox mode
 mise run pi:shell          # Open bash in sandbox container
 mise run pi:yolo           # Run directly from source (no sandbox)
 mise run pi:build          # Build/rebuild sandbox image
-mise run pi -v ~/projects/docs -v ../shared  # Add extra sandbox folders
+mise run pi -d ~/projects/docs -d ../shared  # Add extra sandbox folders
 ```
 
-`-v/--volume` is a wrapper flag, not pi's CLI version flag. Use `pi --version` directly if you want version output. Relative folder paths are resolved from the directory you launch `mise run pi` in.
+`-d/--directory` is a wrapper flag for sandboxed `mise run pi*` tasks. `-v` remains pi's version flag. Relative directory paths are resolved from the directory you launch `mise run pi` in. `pi:yolo` does not support extra sandbox directory mounts.
 
 #### New machine setup
 

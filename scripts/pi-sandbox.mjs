@@ -285,7 +285,62 @@ function resolveFolders(config, extraFolders = [], extraFoldersBaseDir = cwd) {
 		addFolder(realpathSync(nearestPiRoot));
 	}
 
+	if (!isPathInside(hostCwd, repoRoot)) {
+		addFolder(repoRoot);
+	}
+
 	return folders;
+}
+
+function buildRepoResourceArgs(hostCwd, mounts) {
+	if (isPathInside(hostCwd, repoRoot)) {
+		return [];
+	}
+
+	const repoMount = mounts.find((mount) => mount.hostPath === repoRoot);
+	if (!repoMount) {
+		return [];
+	}
+
+	const projectPiDir = path.join(repoRoot, ".pi");
+	if (!existsSync(projectPiDir) || !statSync(projectPiDir).isDirectory()) {
+		return [];
+	}
+
+	const projectPiContainerDir = `${repoMount.containerPath}/.pi`;
+	const args = [];
+	const extensionsDir = path.join(projectPiDir, "extensions");
+	if (existsSync(extensionsDir) && statSync(extensionsDir).isDirectory()) {
+		for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
+			if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".js"))) {
+				args.push("--extension", `${projectPiContainerDir}/extensions/${entry.name}`);
+				continue;
+			}
+			if (!entry.isDirectory()) {
+				continue;
+			}
+			for (const extensionName of ["index.ts", "index.js"]) {
+				const extensionPath = path.join(extensionsDir, entry.name, extensionName);
+				if (!existsSync(extensionPath) || !statSync(extensionPath).isFile()) {
+					continue;
+				}
+				args.push("--extension", `${projectPiContainerDir}/extensions/${entry.name}/${extensionName}`);
+				break;
+			}
+		}
+	}
+
+	const skillsDir = path.join(projectPiDir, "skills");
+	if (existsSync(skillsDir) && statSync(skillsDir).isDirectory()) {
+		args.push("--skill", `${projectPiContainerDir}/skills`);
+	}
+
+	const promptsDir = path.join(projectPiDir, "prompts");
+	if (existsSync(promptsDir) && statSync(promptsDir).isDirectory()) {
+		args.push("--prompt-template", `${projectPiContainerDir}/prompts`);
+	}
+
+	return args;
 }
 
 function sanitizeFolderName(name) {
@@ -430,7 +485,7 @@ function ensureImage(runtime, config, image) {
 	}
 }
 
-function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCwd, passthroughArgs, launchMode) {
+function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCwd, resourceArgs, passthroughArgs, launchMode) {
 	const hostHome = os.homedir();
 	const readonly = launchMode === "readonly";
 	const dockerArgs = ["run", "--rm", "--interactive", "--network", config.network, "--workdir", containerCwd];
@@ -501,7 +556,9 @@ function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCw
 		return dockerArgs;
 	}
 
-	const piArgs = readonly ? ["--tools", "read,grep,find,ls", ...passthroughArgs] : passthroughArgs;
+	const piArgs = readonly
+		? ["--tools", "read,grep,find,ls", ...resourceArgs, ...passthroughArgs]
+		: [...resourceArgs, ...passthroughArgs];
 	dockerArgs.push(image, ...piArgs);
 	return dockerArgs;
 }
@@ -549,6 +606,7 @@ function main() {
 	const mounts = buildMounts(folders);
 	const hostCwd = realpathSync(cwd);
 	const containerCwd = resolveContainerCwd(hostCwd, mounts);
+	const resourceArgs = buildRepoResourceArgs(hostCwd, mounts);
 	ensureImage(runtime, config, image);
 	const dockerRunArgs = buildDockerRunArgs(
 		runtime,
@@ -557,6 +615,7 @@ function main() {
 		folders,
 		mounts,
 		containerCwd,
+		resourceArgs,
 		passthroughArgs,
 		SANDBOX_MODE,
 	);

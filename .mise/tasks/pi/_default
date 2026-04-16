@@ -4,54 +4,27 @@
 #MISE dir="{{cwd}}"
 set -euo pipefail
 
-project_root="$(cd "${MISE_PROJECT_ROOT}" && pwd -P)"
 launch_cwd="$(pwd -P)"
-cwd="$launch_cwd"
-needs_project_resource_flags=false
-if [[ "$cwd" == "$project_root/"* ]]; then
-  if [[ "$cwd" != "$project_root" ]]; then
-    needs_project_resource_flags=true
-  fi
-else
-  cd "$project_root"
-  cwd="$project_root"
-fi
-
 args=()
 extra_folders=()
 
-if [[ "$needs_project_resource_flags" == "true" ]]; then
-  project_pi_relative="$(node -e 'const path = require("node:path"); process.stdout.write(path.relative(process.argv[1], process.argv[2]));' "$cwd" "$project_root/.pi")"
-
-  if [[ -d "$project_root/.pi/extensions" ]]; then
-    shopt -s nullglob
-    for extension in "$project_root/.pi/extensions"/*.ts "$project_root/.pi/extensions"/*.js; do
-      args+=(--extension "${project_pi_relative}/extensions/$(basename "$extension")")
-    done
-    for extension in "$project_root/.pi/extensions"/*/index.ts "$project_root/.pi/extensions"/*/index.js; do
-      relative_extension="${extension#"$project_root/.pi/"}"
-      args+=(--extension "${project_pi_relative}/${relative_extension}")
-    done
-    shopt -u nullglob
-  fi
-
-  [[ -d "$project_root/.pi/skills" ]] && args+=(--skill "${project_pi_relative}/skills")
-  [[ -d "$project_root/.pi/prompts" ]] && args+=(--prompt-template "${project_pi_relative}/prompts")
-fi
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -v|--volume)
+    -d|--directory)
       if [[ $# -lt 2 ]]; then
-        echo "pi: missing folder path for $1" >&2
+        echo "pi: missing directory path for $1" >&2
         exit 1
       fi
       extra_folders+=("$2")
       shift 2
       ;;
-    --volume=*)
-      extra_folders+=("${1#--volume=}")
+    --directory=*)
+      extra_folders+=("${1#--directory=}")
       shift
+      ;;
+    -v|--volume|--volume=*)
+      echo "pi: -v/--volume was removed for mise wrappers; use -d/--directory instead" >&2
+      exit 1
       ;;
     --)
       shift

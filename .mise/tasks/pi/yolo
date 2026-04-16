@@ -4,4 +4,24 @@
 #MISE dir="{{cwd}}"
 set -euo pipefail
 
-"${MISE_PROJECT_ROOT}/pi-test.sh" "$@"
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -d|--directory|--directory=*|-v|--volume|--volume=*)
+      echo "pi:yolo: extra directory mounts are only supported by sandboxed wrappers (pi, pi:readonly, pi:shell)" >&2
+      echo "pi:yolo: use mise run pi -d <path> instead" >&2
+      exit 1
+      ;;
+    --)
+      shift
+      args+=("$@")
+      break
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
+
+"${MISE_PROJECT_ROOT}/pi-test.sh" "${args[@]}"

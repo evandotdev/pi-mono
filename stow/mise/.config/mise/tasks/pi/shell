@@ -5,7 +5,7 @@
 set -euo pipefail
 
 PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"
-PI_SCRIPT="${PI_MONO_ROOT}/scripts/pi-sandbox.sh"
+PI_SCRIPT="${PI_MONO_ROOT}/.mise/tasks/pi/shell"
 
 if [[ ! -x "${PI_SCRIPT}" ]]; then
   echo "mise task pi:shell: missing executable ${PI_SCRIPT}" >&2
@@ -13,4 +13,4 @@ if [[ ! -x "${PI_SCRIPT}" ]]; then
   exit 1
 fi
 
-PI_SANDBOX_LAUNCH_MODE=shell exec "${PI_SCRIPT}" "$@"
+MISE_PROJECT_ROOT="${PI_MONO_ROOT}" exec "${PI_SCRIPT}" "$@"

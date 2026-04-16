@@ -8,7 +8,7 @@
 - Multi-account OAuth flow and load balancing, including account selection during model switches and retry-time credential rotation on rate-limit/overload failures.
 - New interactive slash command capabilities: `/thinking`, `/context`, `/model list`, and `/generate-models`.
 - Namespaced command groups for sessions and prompts, with canonical forms (`/session:*`, `/prompt:*`) and backward-compatible short aliases.
-- Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command with host-to-container mount mappings, local sandbox image tooling, and `-v <folder>` overrides for extra sandbox mounts under `/home/pisandbox`.
+- Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command with host-to-container mount mappings, local sandbox image tooling, and `-d <directory>` overrides for extra sandbox mounts under `/home/pisandbox`.
 - Stow-based machine setup automation for repo `.pi` resources and global `mise` task wrappers.
 - Current fork resources include `plan-mode/`, the `commit` and `security` skills, and bundled extensions `grep-home-shorten.ts`, `guardrails.ts`, `prompt-url-widget.ts`, `redraws.ts`, `sandbox.ts`, and `tps.ts`.
 - Legacy bundled `diff.ts` and `files.ts` extensions were removed from `.pi/extensions`.
@@ -33,7 +33,7 @@
 
 ### Changed
 
-- Changed sandbox wrappers to accept repeated `-v/--volume` folder mounts for extra sandbox directories, resolved relative to the wrapper launch directory.
+- Changed sandbox wrappers to accept repeated `-d/--directory` mounts for extra sandbox directories, resolved relative to the wrapper launch directory.
 - Changed sandbox runs to use the repo-local minimal `.pi/gitconfig` instead of mounting the host gitconfig.
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 - Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
@@ -45,6 +45,8 @@
 
 - Fixed `pi:stow:mise:install` to also manage a global sandbox gitconfig override so `mise run pi` works from other repositories without requiring a host `~/.gitconfig`.
 - Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
+- Fixed `pi:yolo` mistakenly treating wrapper-style extra-directory flags as pi CLI flags by reserving `-d/--directory` for sandbox wrapper mounts and rejecting those flags in the direct-source wrapper.
+- Fixed sandboxed `mise run pi` wrappers launched outside `~/pi-mono` to keep the caller's cwd while still mounting the fork checkout and loading repo-local prompts, skills, and extensions from `~/pi-mono`.
 - Fixed Alt keybindings inside Zellij by skipping the Kitty keyboard protocol query there and enabling xterm `modifyOtherKeys` mode 2 directly ([#3163](https://github.com/badlogic/pi-mono/issues/3163))
 - Fixed `/scoped-models` reordering to propagate into the `/model` scoped tab, preserving the user-defined scoped model order instead of re-sorting it ([#3217](https://github.com/badlogic/pi-mono/issues/3217))
 - Fixed `session_shutdown` to fire on `SIGHUP` and `SIGTERM` in interactive, print, and RPC modes so extensions can run shutdown cleanup on those signal-driven exits ([#3212](https://github.com/badlogic/pi-mono/issues/3212))
