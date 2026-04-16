@@ -462,23 +462,23 @@ function resolveContainerCwd(hostCwd, mounts) {
 
 function ensureLocalImage(runtime, image) {
 	const inspect = runCapture(runtime, ["image", "inspect", image]);
-	if (inspect.status === 0) return;
+	if (inspect.status === 0) return image;
 
-	const dockerfilePath = path.join(repoRoot, "docker", "pi-sandbox", "Dockerfile");
-
-	console.log(`pi-sandbox: building '${image}' from local fork packages ...`);
-	runOrFail(runtime, ["build", "-f", dockerfilePath, "-t", image, repoRoot]);
+	const buildScript = path.join(repoRoot, "scripts", "pi-sandbox-build.sh");
+	const env = { ...process.env, PI_CONTAINER_RUNTIME: runtime };
+	delete env.PI_SANDBOX_IMAGE;
+	runOrFail("bash", [buildScript], { env });
+	return resolveSandboxImage("pi-sandbox:latest", repoRoot);
 }
 
 function ensureImage(runtime, config, image) {
 	if (isDefaultSandboxImage(config.image)) {
-		ensureLocalImage(runtime, image);
-		return;
+		return ensureLocalImage(runtime, image);
 	}
 
 	if (config.pullOnStart) {
 		runOrFail(runtime, ["pull", image]);
-		return;
+		return image;
 	}
 
 	const inspect = runCapture(runtime, ["image", "inspect", image]);
@@ -486,6 +486,8 @@ function ensureImage(runtime, config, image) {
 		console.log(`pi-sandbox: pulling '${image}' ...`);
 		runOrFail(runtime, ["pull", image]);
 	}
+
+	return image;
 }
 
 function buildDockerRunArgs(runtime, config, image, folders, mounts, containerCwd, resourceArgs, passthroughArgs, launchMode) {
@@ -600,7 +602,7 @@ function main() {
 		return;
 	}
 
-	const image = resolveSandboxImage(config.image, repoRoot);
+	let image = resolveSandboxImage(config.image, repoRoot);
 	const folders = resolveFolders(
 		config,
 		parseFoldersEnv(process.env[EXTRA_FOLDERS_ENV]),
@@ -610,7 +612,7 @@ function main() {
 	const hostCwd = realpathSync(cwd);
 	const containerCwd = resolveContainerCwd(hostCwd, mounts);
 	const resourceArgs = buildRepoResourceArgs(hostCwd, mounts);
-	ensureImage(runtime, config, image);
+	image = ensureImage(runtime, config, image);
 	const dockerRunArgs = buildDockerRunArgs(
 		runtime,
 		config,
