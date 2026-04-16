@@ -41,30 +41,33 @@ I regularly publish my own `pi-mono` work sessions here:
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| **[@mariozechner/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@mariozechner/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@mariozechner/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@mariozechner/pi-mom](packages/mom)** | Slack bot that delegates messages to the pi coding agent |
-| **[@mariozechner/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-| **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
-| **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
+| Package                                                    | Description                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------------------- |
+| **[@mariozechner/pi-ai](packages/ai)**                     | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
+| **[@mariozechner/pi-agent-core](packages/agent)**          | Agent runtime with tool calling and state management             |
+| **[@mariozechner/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI                                     |
+| **[@mariozechner/pi-mom](packages/mom)**                   | Slack bot that delegates messages to the pi coding agent         |
+| **[@mariozechner/pi-tui](packages/tui)**                   | Terminal UI library with differential rendering                  |
+| **[@mariozechner/pi-web-ui](packages/web-ui)**             | Web components for AI chat interfaces                            |
+| **[@mariozechner/pi-pods](packages/pods)**                 | CLI for managing vLLM deployments on GPU pods                    |
 
 ## Fork Updates
 
 ### Unreleased
 
-- Docker sandbox workflow for fork development:
-  - monorepo `mise` tasks (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`)
+- OAuth multi-account load balancing for Anthropic and OpenAI Codex
+  - multiple accounts per provider with account-aware deduplication
+  - account selection directly in `/login` and `/model`
+  - automatic credential rotation on retryable rate-limit/overload responses (with notification)
+- Interactive usage telemetry
+  - footer shows provider usage windows (e.g. `5h`, `1d`, `7d`) with reset timing
+  - `/login` shows per-account usage metrics to make account switching explicit
+
+- Docker sandbox workflows
   - repeated `-v/--volume` folder mounts for extra sandbox paths, resolved from the launch directory
+  - monorepo `mise` tasks (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`)
   - `/sandbox` status + verification command from the bundled sandbox extension
   - local sandbox image build/tag scripts under `scripts/pi-sandbox*`
-- Current fork resources:
-  - `plan-mode/` branch-based planning extension
-  - `commit` and `security` skills
-  - `grep-home-shorten.ts`, `guardrails.ts`, `prompt-url-widget.ts`, `redraws.ts`, `sandbox.ts`, and `tps.ts`
-- Legacy bundled `diff.ts` and `files.ts` extensions are no longer shipped.
 - Slash command grouping updates:
   - session commands now support namespaced forms (`/session:new`, `/session:resume`, `/session:name`, `/session:rename`) with short aliases retained (`/new`, `/resume`, `/name`)
   - prompt templates support namespaced invocation via `/prompt:<template>` in addition to `/<template>`
@@ -72,29 +75,25 @@ I regularly publish my own `pi-mono` work sessions here:
   - `pi:stow:install` / `pi:stow:uninstall` for linking repo `.pi` resources into `~/.pi`
   - `pi:stow:mise:install` / `pi:stow:mise:uninstall` for global `mise` task wrappers under `~/.config/mise`
 
-### Custom Extensions and Skills
+### Custom Extensions
 
 The current bundled set is below; legacy `diff.ts` and `files.ts` are no longer bundled.
 
-- [plan-mode/](.pi/extensions/plan-mode/) branches planning into a separate session tree with `/plan` and `Ctrl+Alt+P`, approval, and implementation handoff.
+- [plan-mode](.pi/extensions/plan-mode/) branches planning into a separate session tree with `/plan` and `Ctrl+Alt+P`, approval, and implementation handoff.
 - [grep-home-shorten.ts](.pi/extensions/grep-home-shorten.ts) truncates your `$HOME` variable into `~` to save tokens.
 - [guardrails.ts](.pi/extensions/guardrails.ts) blocks risky path and command patterns (for example `sudo` or `rm -rf`) with layered `repo-default`/`project`/`global` config scopes.
-- [prompt-url-widget.ts](.pi/extensions/prompt-url-widget.ts) detects GitHub PR / issue prompts and shows metadata in a widget.
-- [redraws.ts](.pi/extensions/redraws.ts) exposes `/tui` to show TUI redraw stats.
 - [sandbox.ts](.pi/extensions/sandbox.ts) sandboxes bash commands with `@anthropic-ai/sandbox-runtime`; see [packages/coding-agent/docs/sandboxing.md](packages/coding-agent/docs/sandboxing.md) for the canonical sandbox map and `/sandbox:info`.
+
+### Custom Skills
+
+- [commit](.pi/skills/commit/) helps create concise Conventional Commits-style commit messages (`/skill:commit`).
+- [security](.pi/skills/security/) guides security review and hardening work (`/skill:security`).
+
+### Provided Extensions
+
 - [tps.ts](.pi/extensions/tps.ts) reports tokens-per-second after each assistant turn.
-- [commit/SKILL.md](.pi/skills/commit/SKILL.md) helps create concise Conventional Commits-style commit messages (`/skill:commit`).
-- [security/SKILL.md](.pi/skills/security/SKILL.md) guides security review and hardening work (`/skill:security`).
-
-### Enhancements
-
-- OAuth multi-account load balancing for Anthropic and OpenAI Codex
-  - multiple saved accounts per provider with account-aware deduplication
-  - account selection directly in `/login` and `/model`
-  - automatic credential rotation on retryable rate-limit/overload responses (with notification)
-- Interactive usage telemetry
-  - footer shows provider usage windows (e.g. `5h`, `1d`, `7d`) with reset timing
-  - `/login` shows per-account usage metrics to make account switching explicit
+- [redraws.ts](.pi/extensions/redraws.ts) exposes `/tui` to show TUI redraw stats.
+- [prompt-url-widget.ts](.pi/extensions/prompt-url-widget.ts) detects GitHub PR / issue prompts and shows metadata in a widget.
 
 ## Contributing
 
