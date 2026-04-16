@@ -13,6 +13,7 @@ MANIFEST_PATH="${MISE_CONFIG_DIR}/.pi-mono-stow-manifest-mise"
 SANDBOX_CONFIG_REL=".pi/agent/extensions/docker-sandbox.json"
 SANDBOX_CONFIG_PATH="${TARGET_ROOT}/${SANDBOX_CONFIG_REL}"
 REPO_GITCONFIG_PATH="${REPO_ROOT}/.pi/gitconfig"
+REPO_SANDBOX_CONFIG_PATH="${REPO_ROOT}/.pi/docker-sandbox.json"
 RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
 TIMESTAMP="${RUN_ID%%-*}"
 
@@ -98,35 +99,48 @@ done < <(find "${PACKAGE_ROOT}" \( -type f -o -type l \) -print0 | sort -z)
 
 stow --dir "${STOW_ROOT}" --target "${TARGET_ROOT}" --restow --no-folding "${PACKAGE_NAME}"
 
-if [[ -e "${REPO_GITCONFIG_PATH}" ]]; then
+if [[ -e "${REPO_SANDBOX_CONFIG_PATH}" || -e "${REPO_GITCONFIG_PATH}" ]]; then
   mkdir -p "$(dirname "${SANDBOX_CONFIG_PATH}")"
-  REPO_GITCONFIG_REALPATH="$(cd "$(dirname "${REPO_GITCONFIG_PATH}")" && pwd -P)/$(basename "${REPO_GITCONFIG_PATH}")"
+  REPO_GITCONFIG_REALPATH=""
+  if [[ -e "${REPO_GITCONFIG_PATH}" ]]; then
+    REPO_GITCONFIG_REALPATH="$(cd "$(dirname "${REPO_GITCONFIG_PATH}")" && pwd -P)/$(basename "${REPO_GITCONFIG_PATH}")"
+  fi
 
-  SANDBOX_CONFIG_PATH="${SANDBOX_CONFIG_PATH}" REPO_GITCONFIG_REALPATH="${REPO_GITCONFIG_REALPATH}" \
+  REPO_SANDBOX_CONFIG_PATH="${REPO_SANDBOX_CONFIG_PATH}" REPO_GITCONFIG_REALPATH="${REPO_GITCONFIG_REALPATH}" \
     node - "${TMP_SANDBOX_CONFIG}" "${TMP_SANDBOX_SHA}" <<'NODE'
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 
 const [configOutputPath, hashOutputPath] = process.argv.slice(2);
-const configPath = process.env.SANDBOX_CONFIG_PATH;
+const sandboxConfigPath = process.env.REPO_SANDBOX_CONFIG_PATH;
 const gitconfigPath = process.env.REPO_GITCONFIG_REALPATH;
 
-let config = {};
-if (configPath && fs.existsSync(configPath)) {
+function readJsonObject(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return {};
+  }
+
   try {
-    const raw = fs.readFileSync(configPath, "utf8").trim();
-    if (raw.length > 0) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        config = parsed;
-      }
+    const raw = fs.readFileSync(filePath, "utf8").trim();
+    if (raw.length === 0) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
     }
   } catch {
-    config = {};
+    return {};
   }
+
+  return {};
 }
 
-config.gitconfig = gitconfigPath;
+const config = readJsonObject(sandboxConfigPath);
+if (gitconfigPath) {
+  config.gitconfig = gitconfigPath;
+}
 const content = `${JSON.stringify(config, null, 2)}\n`;
 fs.writeFileSync(configOutputPath, content);
 fs.writeFileSync(hashOutputPath, crypto.createHash("sha256").update(content).digest("hex"));
@@ -153,7 +167,7 @@ NODE
     sandbox_config_managed="1"
   fi
 else
-  echo "pi:stow:mise:install: warning: repo gitconfig not found: ${REPO_GITCONFIG_PATH}" >&2
+  echo "pi:stow:mise:install: warning: repo sandbox config not found: ${REPO_SANDBOX_CONFIG_PATH}" >&2
 fi
 
 {

@@ -34,6 +34,8 @@ The launcher resolves config in this order:
 3. `<repo>/.pi/docker-sandbox.json`
 4. CLI/runtime overrides from `PI_SANDBOX_*`
 
+When you use `mise run pi:stow:mise:install`, the global file is generated from the repo `.pi/docker-sandbox.json` and keeps the same Docker sandbox fields outside the repo, while pinning `gitconfig` to the checkout path.
+
 ### Key files
 
 - `scripts/pi-sandbox.mjs` — resolves image, folders, mounts, and runtime args
@@ -51,8 +53,8 @@ The launcher resolves config in this order:
 
 - `scripts/pi-sandbox.mjs`
 - `.mise/tasks/pi/*`
-- `.pi/docker-sandbox.json`
-- `~/.pi/agent/extensions/docker-sandbox.json`
+- `.pi/docker-sandbox.json` — repo-local source of truth for Docker sandbox settings
+- `~/.pi/agent/extensions/docker-sandbox.json` — managed global mirror written by `pi:stow:mise:install`
 
 ## OS-level sandbox extension
 
