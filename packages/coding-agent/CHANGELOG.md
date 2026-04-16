@@ -25,6 +25,7 @@
 - Added `/model list` support to print available models in chat.
 - Added `/generate-models` slash command to run pi-ai model generation from interactive mode.
 - Added `/usage` slash command to show OAuth provider usage across all accounts with utilization windows and reset timing.
+- Added `/share:system-prompt` to export the current effective system prompt as a secret GitHub gist with stable SHA-256 metadata for prompt fingerprinting.
 - Added grouped session command names `/session:new`, `/session:resume`, `/session:name`, and `/session:rename` while keeping `/new`, `/resume`, and `/name` as aliases.
 - Added `/prompt:<template>` aliases for prompt templates in expansion, slash-command autocomplete, and `/hotkeys` output.
 - Added monorepo `mise` tasks and stow helpers for sandbox launch workflows (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`, and `pi:stow:*`).

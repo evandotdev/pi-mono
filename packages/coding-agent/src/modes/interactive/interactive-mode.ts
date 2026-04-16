@@ -65,6 +65,7 @@ import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../cor
 import { type SessionContext, SessionManager } from "../../core/session-manager.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
+import { buildSystemPromptShareMarkdown } from "../../core/system-prompt-share.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { formatUsageReport, UsageService } from "../../core/usage-service.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
@@ -2265,6 +2266,11 @@ export class InteractiveMode {
 			}
 			if (text === "/share") {
 				await this.handleShareCommand();
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/share:system-prompt") {
+				await this.handleShareSystemPromptCommand();
 				this.editor.setText("");
 				return;
 			}
@@ -4591,30 +4597,24 @@ export class InteractiveMode {
 		}
 	}
 
-	private async handleShareCommand(): Promise<void> {
-		// Check if gh is available and logged in
-		try {
-			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
-			if (authResult.status !== 0) {
-				this.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
-				return;
-			}
-		} catch {
+	private ensureGitHubCliAuthenticated(): boolean {
+		const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
+		if (authResult.error) {
 			this.showError("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
-			return;
+			return false;
 		}
-
-		// Export to a temp file
-		const tmpFile = path.join(os.tmpdir(), "session.html");
-		try {
-			await this.session.exportToHtml(tmpFile);
-		} catch (error: unknown) {
-			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
-			return;
+		if (authResult.status !== 0) {
+			this.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
+			return false;
 		}
+		return true;
+	}
 
-		// Show cancellable loader, replacing the editor
-		const loader = new BorderedLoader(this.ui, theme, "Creating gist...");
+	private async createSecretGistFromFile(
+		inputPath: string,
+		options: { loaderMessage: string; cancelMessage: string; description?: string },
+	): Promise<string | undefined> {
+		const loader = new BorderedLoader(this.ui, theme, options.loaderMessage);
 		this.editorContainer.clear();
 		this.editorContainer.addChild(loader);
 		this.ui.setFocus(loader);
@@ -4626,63 +4626,150 @@ export class InteractiveMode {
 			this.editorContainer.addChild(this.editor);
 			this.ui.setFocus(this.editor);
 			try {
-				fs.unlinkSync(tmpFile);
+				fs.unlinkSync(inputPath);
 			} catch {
 				// Ignore cleanup errors
 			}
 		};
 
-		// Create a secret gist asynchronously
 		let proc: ReturnType<typeof spawn> | null = null;
-
 		loader.onAbort = () => {
 			proc?.kill();
 			restoreEditor();
-			this.showStatus("Share cancelled");
+			this.showStatus(options.cancelMessage);
 		};
 
 		try {
-			const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
-				proc = spawn("gh", ["gist", "create", "--public=false", tmpFile]);
+			const gistArgs = ["gist", "create", "--public=false"];
+			if (options.description) {
+				gistArgs.push("-d", options.description);
+			}
+			gistArgs.push(inputPath);
+
+			const result = await new Promise<{
+				stdout: string;
+				stderr: string;
+				code: number | null;
+				error?: Error;
+			}>((resolve) => {
+				proc = spawn("gh", gistArgs);
 				let stdout = "";
 				let stderr = "";
-				proc.stdout?.on("data", (data) => {
+				proc.stdout?.on("data", (data: Buffer | string) => {
 					stdout += data.toString();
 				});
-				proc.stderr?.on("data", (data) => {
+				proc.stderr?.on("data", (data: Buffer | string) => {
 					stderr += data.toString();
 				});
+				proc.on("error", (error) => resolve({ stdout, stderr, code: null, error }));
 				proc.on("close", (code) => resolve({ stdout, stderr, code }));
 			});
 
-			if (loader.signal.aborted) return;
-
+			if (loader.signal.aborted) return undefined;
 			restoreEditor();
 
+			if (result.error) {
+				this.showError(`Failed to create gist: ${result.error.message}`);
+				return undefined;
+			}
 			if (result.code !== 0) {
-				const errorMsg = result.stderr?.trim() || "Unknown error";
+				const errorMsg = result.stderr.trim() || "Unknown error";
 				this.showError(`Failed to create gist: ${errorMsg}`);
-				return;
+				return undefined;
 			}
 
-			// Extract gist ID from the URL returned by gh
-			// gh returns something like: https://gist.github.com/username/GIST_ID
-			const gistUrl = result.stdout?.trim();
-			const gistId = gistUrl?.split("/").pop();
-			if (!gistId) {
-				this.showError("Failed to parse gist ID from gh output");
-				return;
+			const gistUrl = result.stdout
+				.trim()
+				.split(/\s+/)
+				.find((value) => value.startsWith("https://gist.github.com/"));
+			if (!gistUrl) {
+				this.showError("Failed to parse gist URL from gh output");
+				return undefined;
 			}
-
-			// Create the preview URL
-			const previewUrl = getShareViewerUrl(gistId);
-			this.showStatus(`Share URL: ${previewUrl}\nGist: ${gistUrl}`);
+			return gistUrl;
 		} catch (error: unknown) {
 			if (!loader.signal.aborted) {
 				restoreEditor();
 				this.showError(`Failed to create gist: ${error instanceof Error ? error.message : "Unknown error"}`);
 			}
+			return undefined;
 		}
+	}
+
+	private async handleShareCommand(): Promise<void> {
+		if (!this.ensureGitHubCliAuthenticated()) return;
+
+		const tmpFile = path.join(os.tmpdir(), `pi-session-${crypto.randomUUID()}.html`);
+		try {
+			await this.session.exportToHtml(tmpFile);
+		} catch (error: unknown) {
+			this.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+			return;
+		}
+
+		const gistUrl = await this.createSecretGistFromFile(tmpFile, {
+			loaderMessage: "Creating gist...",
+			cancelMessage: "Share cancelled",
+		});
+		if (!gistUrl) return;
+
+		const gistId = gistUrl.split("/").pop();
+		if (!gistId) {
+			this.showError("Failed to parse gist ID from gh output");
+			return;
+		}
+
+		const previewUrl = getShareViewerUrl(gistId);
+		this.showStatus(`Share URL: ${previewUrl}\nGist: ${gistUrl}`);
+	}
+
+	private async handleShareSystemPromptCommand(): Promise<void> {
+		if (!this.ensureGitHubCliAuthenticated()) return;
+
+		const currentModel = this.session.model;
+		const provider = currentModel?.provider;
+		const modelId = currentModel?.id;
+		const thinkingLevel = this.session.thinkingLevel;
+		const timestamp = new Date().toISOString();
+		const systemPrompt = this.session.systemPrompt;
+		const artifact = buildSystemPromptShareMarkdown(
+			{
+				app: APP_NAME,
+				version: this.version,
+				date: timestamp,
+				sessionId: this.session.sessionId,
+				sessionName: this.session.sessionName,
+				sessionFile: this.session.sessionFile,
+				cwd: this.sessionManager.getCwd(),
+				provider,
+				model: modelId,
+				thinkingLevel,
+				activeTools: this.session.getActiveToolNames(),
+			},
+			systemPrompt,
+		);
+
+		const tmpFile = path.join(os.tmpdir(), `pi-system-prompt-${artifact.shortHash}.md`);
+		try {
+			fs.writeFileSync(tmpFile, artifact.markdown, "utf8");
+		} catch (error: unknown) {
+			this.showError(
+				`Failed to prepare system prompt gist: ${error instanceof Error ? error.message : "Unknown error"}`,
+			);
+			return;
+		}
+
+		const gistUrl = await this.createSecretGistFromFile(tmpFile, {
+			loaderMessage: "Creating system prompt gist...",
+			cancelMessage: "System prompt share cancelled",
+			description: `pi system prompt ${artifact.shortHash}`,
+		});
+		if (!gistUrl) return;
+
+		const providerModel = provider && modelId ? `${provider}/${modelId}` : (modelId ?? provider ?? "unknown");
+		this.showStatus(
+			`System prompt gist: ${gistUrl}\nSHA-256: ${artifact.sha256}\nShort: ${artifact.shortHash}\nDate: ${timestamp}\nModel: ${providerModel}\nThinking: ${thinkingLevel}`,
+		);
 	}
 
 	private async handleCopyCommand(): Promise<void> {

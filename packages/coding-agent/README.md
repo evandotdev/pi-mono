@@ -179,6 +179,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/export [file]` | Export session to HTML file |
 | `/import [file]` | Import and resume a session from a JSONL file |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
+| `/share:system-prompt` | Upload the current effective system prompt as a private GitHub gist |
 | `/usage` | Show OAuth provider usage across all accounts |
 | `/reload` | Reload keybindings, extensions, skills, prompts, and context files (themes hot-reload automatically) |
 | `/hotkeys` | Show all keyboard shortcuts |
@@ -289,6 +290,8 @@ Use for project instructions, conventions, common commands. All matching files a
 ### System Prompt
 
 Replace the default system prompt with `.pi/SYSTEM.md` (project) or `~/.pi/agent/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`.
+
+Raw JSONL session files do not normally include the effective `systemPrompt`. Use `/share:system-prompt` when you need a stable, hashable artifact for prompt fingerprinting or cross-session prompt comparisons.
 
 ---
 
