@@ -31,6 +31,13 @@
         "requireConfirmation": true
       },
       {
+        "pattern": "rm -f",
+        "description": "force delete",
+        "tools": ["bash"],
+        "targets": ["command"],
+        "requireConfirmation": true
+      },
+      {
         "pattern": "rm -rf /",
         "description": "recursive force delete",
         "tools": ["bash"],
