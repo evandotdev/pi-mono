@@ -12,22 +12,27 @@ Create a git commit for the current changes using a concise Conventional Commits
 ```
 
 - `type`: (REQUIRED) Use one of fix, feat, build, chore, ci, docs, style, refactor, perf, test
-- `scope`: (OPTIONAL) e.g. api, docs, ui, you can also run the following command to see existing type and scopes in the current repository:
+- `scope`: (OPTIONAL) run the following command to see existing scopes:
 
 ```bash
-# Try this first
 git log --pretty=format:%s \
-| grep -E '^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([^()]+\))?(!)?: ' \
-| cut -d: -f1 \
-| sort -u
-# If error occurs, use this instead:
-git log -n 50 --pretty=format:%s
+   | grep -Ei '^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([^()]+\))?(!)?: ' \
+   | sed -nE 's/^[^()]*\(([^()]+)\)(!)?: .*/\1/p' \
+   | tr '[:upper:]' '[:lower:]' \
+   | tr ',' '\n' \
+   | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+   | sed '/^$/d' \
+   | sort \
+   | uniq -c \
+   | sort -nr \
+   | head -n 50
 ```
 
 - `description`: (REQUIRED) Short, imperative, <= 72 chars, no trailing period.
 
 ## Notes
 
+- Always use imperative present tense
 - Body is OPTIONAL. If needed, add a blank line after the subject and write a short paragraph.
 - Do NOT include breaking-change markers or footers.
 - Do NOT add sign-offs (no `Signed-off-by`).
@@ -42,16 +47,20 @@ git log -n 50 --pretty=format:%s
 
 1. Infer from the prompt if the user provided specific file paths/globs and/or additional instructions.
 2. Review `git status` and `git diff` to understand the current changes (limit to argument-specified files if provided). Note that git diff will not include untracked files.
-3. (Optional) Run the following command to see commonly used scopes.
+3. Run the following command to see commonly used scopes.
 
 ```bash
-# Try this first
 git log --pretty=format:%s \
-| grep -E '^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([^()]+\))?(!)?: ' \
-| cut -d: -f1 \
-| sort -u
-# If error occurs, use this instead:
-git log -n 50 --pretty=format:%s
+   | grep -Ei '^(feat|fix|build|chore|ci|docs|style|refactor|perf|test|revert)(\([^()]+\))?(!)?: ' \
+   | sed -nE 's/^[^()]*\(([^()]+)\)(!)?: .*/\1/p' \
+   | tr '[:upper:]' '[:lower:]' \
+   | tr ',' '\n' \
+   | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+   | sed '/^$/d' \
+   | sort \
+   | uniq -c \
+   | sort -nr \
+   | head -n 50
 ```
 
 4. If there are ambiguous extra files, ask the user for clarification before committing.
@@ -62,3 +71,5 @@ git log -n 50 --pretty=format:%s
 
 - docs: update readme
 - docs(coding-agent): update readme
+- docs(coding-agent): update changelog
+- fix(api): serialize json
