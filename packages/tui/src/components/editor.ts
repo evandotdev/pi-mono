@@ -608,6 +608,8 @@ export class Editor implements Component, Focusable {
 				if (selected && this.autocompleteProvider) {
 					this.pushUndoSnapshot();
 					this.lastAction = null;
+					const shouldChainSlashArgumentCompletion =
+						this.autocompletePrefix.startsWith("/") && !this.autocompletePrefix.trimStart().includes(" ");
 					const result = this.autocompleteProvider.applyCompletion(
 						this.state.lines,
 						this.state.cursorLine,
@@ -620,6 +622,9 @@ export class Editor implements Component, Focusable {
 					this.setCursorCol(result.cursorCol);
 					this.cancelAutocomplete();
 					if (this.onChange) this.onChange(this.getText());
+					if (shouldChainSlashArgumentCompletion) {
+						this.tryTriggerAutocomplete(true);
+					}
 				}
 				return;
 			}

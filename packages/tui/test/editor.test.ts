@@ -2480,6 +2480,39 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.isShowingAutocomplete(), false);
 		});
 
+		it("shows namespaced slash command argument completions after tab-completing command", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const provider = new CombinedAutocompleteProvider([
+				{
+					name: "model:default",
+					description: "Configure default model",
+					getArgumentCompletions: (prefix) => {
+						const models = [
+							{ value: "anthropic/claude-sonnet-4-5", label: "claude-sonnet-4-5" },
+							{ value: "openai/gpt-4.1", label: "gpt-4.1" },
+						];
+						const filtered = models.filter((model) => model.value.startsWith(prefix));
+						return filtered.length > 0 ? filtered : null;
+					},
+				},
+			]);
+			editor.setAutocompleteProvider(provider);
+			editor.setText("/mo");
+
+			editor.handleInput("\t");
+			await flushAutocomplete();
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+
+			editor.handleInput("\t");
+			await flushAutocomplete();
+			assert.strictEqual(editor.getText(), "/model:default ");
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+
+			editor.handleInput("\t");
+			assert.strictEqual(editor.getText(), "/model:default anthropic/claude-sonnet-4-5");
+			assert.strictEqual(editor.isShowingAutocomplete(), false);
+		});
+
 		it("ignores invalid slash command argument completion results", async () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			const provider = new CombinedAutocompleteProvider([
