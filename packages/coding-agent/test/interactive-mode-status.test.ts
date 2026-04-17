@@ -265,3 +265,80 @@ describe("InteractiveMode.showLoadedResources", () => {
 		expect(output).not.toContain("[Skills]");
 	});
 });
+
+describe("InteractiveMode.handleModelCommand", () => {
+	const selectedModel: Model<"anthropic-messages"> = {
+		id: "claude-sonnet-4-5",
+		name: "Claude Sonnet 4.5",
+		provider: "anthropic",
+		api: "anthropic-messages",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 200000,
+		maxTokens: 8192,
+		baseUrl: "https://api.anthropic.com",
+	};
+
+	test("opens the default scope in active-switch mode", async () => {
+		const fakeThis: any = {
+			parseModelCommandInput: vi.fn(() => ({ type: "scope", scope: "default", searchTerm: undefined })),
+			showModelList: vi.fn(),
+			showModelSelections: vi.fn(),
+			showModelSelector: vi.fn(),
+			findExactModelMatch: vi.fn(),
+			selectModelAndMaybeAccount: vi.fn(),
+			setModelSelectionForScope: vi.fn(),
+		};
+
+		await (InteractiveMode as any).prototype.handleModelCommand.call(fakeThis, "/model:default");
+
+		expect(fakeThis.showModelSelector).toHaveBeenCalledWith(undefined, {
+			scope: "default",
+			switchActiveModel: true,
+		});
+	});
+
+	test("switches an exact default-scope model through the active model path", async () => {
+		const fakeThis: any = {
+			parseModelCommandInput: vi.fn(() => ({
+				type: "scope",
+				scope: "default",
+				searchTerm: "anthropic/claude-sonnet-4-5",
+			})),
+			showModelList: vi.fn(),
+			showModelSelections: vi.fn(),
+			showModelSelector: vi.fn(),
+			findExactModelMatch: vi.fn(async () => selectedModel),
+			selectModelAndMaybeAccount: vi.fn(async () => {}),
+			setModelSelectionForScope: vi.fn(),
+		};
+
+		await (InteractiveMode as any).prototype.handleModelCommand.call(
+			fakeThis,
+			"/model:default anthropic/claude-sonnet-4-5",
+		);
+
+		expect(fakeThis.selectModelAndMaybeAccount).toHaveBeenCalledWith(selectedModel);
+		expect(fakeThis.setModelSelectionForScope).not.toHaveBeenCalled();
+	});
+
+	test("keeps non-default scopes as settings-only selections", async () => {
+		const fakeThis: any = {
+			parseModelCommandInput: vi.fn(() => ({ type: "scope", scope: "plan", searchTerm: undefined })),
+			showModelList: vi.fn(),
+			showModelSelections: vi.fn(),
+			showModelSelector: vi.fn(),
+			findExactModelMatch: vi.fn(),
+			selectModelAndMaybeAccount: vi.fn(),
+			setModelSelectionForScope: vi.fn(),
+		};
+
+		await (InteractiveMode as any).prototype.handleModelCommand.call(fakeThis, "/model:plan");
+
+		expect(fakeThis.showModelSelector).toHaveBeenCalledWith(undefined, {
+			scope: "plan",
+			switchActiveModel: false,
+		});
+	});
+});

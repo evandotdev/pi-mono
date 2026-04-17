@@ -34,7 +34,7 @@ Edit directly or use `/settings` for common options.
 }
 ```
 
-Configure interactively with `/model:<scope>` (for example `/model:plan`, `/model:default`, `/model:extension:answer`).
+Configure interactively with `/model:<scope>` (for example `/model:plan`, `/model:default`, `/model:extension:answer`). When you pick `/model:default`, pi also updates the active model for the current session.
 
 #### thinkingBudgets
 

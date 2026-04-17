@@ -3816,7 +3816,8 @@ export class InteractiveMode {
 			return;
 		}
 
-		const switchActiveModel = parsed.type === "active";
+		// The default scope drives the active session model; other scopes remain configuration-only.
+		const switchActiveModel = parsed.type === "active" || (parsed.type === "scope" && parsed.scope === "default");
 		const scope = parsed.type === "scope" ? parsed.scope : "default";
 		const trimmedSearchTerm = parsed.searchTerm?.trim();
 		if (!trimmedSearchTerm) {
@@ -3964,7 +3965,9 @@ export class InteractiveMode {
 		const scope = this.normalizeModelScope(options?.scope ?? "default");
 		const switchActiveModel = options?.switchActiveModel ?? true;
 		const configuredModel = this.getConfiguredModelForScope(scope);
-		const currentModel = configuredModel ?? this.session.model;
+		const currentModel = switchActiveModel
+			? (this.session.model ?? configuredModel)
+			: (configuredModel ?? this.session.model);
 
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
