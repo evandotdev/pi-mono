@@ -2229,6 +2229,13 @@ export class AgentSession {
 					})();
 				},
 				getSystemPrompt: () => this.systemPrompt,
+				getConfiguredModel: (scope) => {
+					const selection = this.settingsManager.getModelSelection(scope);
+					if (!selection) {
+						return undefined;
+					}
+					return this.modelRegistry.find(selection.provider, selection.modelId);
+				},
 			},
 			{
 				registerProvider: (name, config) => {

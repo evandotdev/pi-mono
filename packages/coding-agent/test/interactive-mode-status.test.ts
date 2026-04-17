@@ -1,3 +1,4 @@
+import type { Model } from "@mariozechner/pi-ai";
 import { Container } from "@mariozechner/pi-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
@@ -105,6 +106,87 @@ describe("InteractiveMode.createExtensionUIContext setTheme", () => {
 		expect(result.success).toBe(false);
 		expect(settingsManager.setTheme).not.toHaveBeenCalled();
 		expect(fakeThis.ui.requestRender).not.toHaveBeenCalled();
+	});
+});
+
+describe("InteractiveMode.setupAutocomplete", () => {
+	test("suggests /model:* namespace commands first, then only models for scoped command arguments", async () => {
+		const model: Model<"anthropic-messages"> = {
+			id: "claude-sonnet-4-5",
+			name: "Claude Sonnet 4.5",
+			provider: "anthropic",
+			api: "anthropic-messages",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200000,
+			maxTokens: 8192,
+			baseUrl: "https://api.anthropic.com",
+		};
+
+		const fakeEditor = {
+			setAutocompleteProvider: vi.fn(),
+		};
+
+		const fakeThis: any = {
+			session: {
+				scopedModels: [],
+				modelRegistry: {
+					getAvailable: () => [model],
+				},
+				promptTemplates: [],
+				extensionRunner: undefined,
+				resourceLoader: {
+					getSkills: () => ({ skills: [] }),
+				},
+			},
+			sessionManager: {
+				getCwd: () => process.cwd(),
+			},
+			settingsManager: {
+				getModelSelections: () => ({
+					default: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+					plan: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+					"extension:answer": { provider: "anthropic", modelId: "claude-sonnet-4-5" },
+				}),
+				getEnableSkillCommands: () => false,
+			},
+			normalizeModelScope: (scope: string) => {
+				const normalized = scope.trim().toLowerCase();
+				return normalized === "normal" ? "default" : normalized;
+			},
+			prefixAutocompleteDescription: (description?: string) => description,
+			defaultEditor: fakeEditor,
+			editor: fakeEditor,
+			skillCommands: new Map(),
+		};
+
+		(InteractiveMode as any).prototype.setupAutocomplete.call(fakeThis, undefined);
+		expect(fakeEditor.setAutocompleteProvider).toHaveBeenCalledTimes(1);
+		expect(fakeThis.autocompleteProvider).toBeDefined();
+
+		const provider = fakeThis.autocompleteProvider;
+		const namespaceSuggestions = await provider.getSuggestions(["/model"], 0, "/model".length, {
+			signal: new AbortController().signal,
+		});
+		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:list")).toBe(true);
+		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:show")).toBe(true);
+		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:default")).toBe(true);
+		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:plan")).toBe(true);
+		expect(
+			namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:extension:answer"),
+		).toBe(true);
+		expect(
+			namespaceSuggestions?.items.some((item: { value: string }) => item.value === "anthropic/claude-sonnet-4-5"),
+		).toBe(false);
+
+		const scopedArgSuggestions = await provider.getSuggestions(["/model:plan "], 0, "/model:plan ".length, {
+			signal: new AbortController().signal,
+		});
+		expect(
+			scopedArgSuggestions?.items.some((item: { value: string }) => item.value === "anthropic/claude-sonnet-4-5"),
+		).toBe(true);
+		expect(scopedArgSuggestions?.items.some((item: { value: string }) => item.value === "show")).toBe(false);
 	});
 });
 

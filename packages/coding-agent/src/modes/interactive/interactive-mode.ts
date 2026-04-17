@@ -398,45 +398,51 @@ export class InteractiveMode {
 			description: command.description,
 		}));
 
-		const modelCommand = slashCommands.find((command) => command.name === "model");
-		if (modelCommand) {
-			modelCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				const commandItems = [{ value: "list", label: "list", description: "List available models in chat" }];
-				const commandMatches = fuzzyFilter(commandItems, prefix, (item) => item.value).map((item) => ({
-					value: item.value,
-					label: item.label,
-					description: item.description,
-				}));
+		const modelAutocompleteItems =
+			this.session.scopedModels.length > 0
+				? this.session.scopedModels.map((s) => ({
+						id: s.model.id,
+						provider: s.model.provider,
+						label: `${s.model.provider}/${s.model.id}`,
+					}))
+				: this.session.modelRegistry.getAvailable().map((m) => ({
+						id: m.id,
+						provider: m.provider,
+						label: `${m.provider}/${m.id}`,
+					}));
 
-				// Get available models (scoped or from registry)
-				const models =
-					this.session.scopedModels.length > 0
-						? this.session.scopedModels.map((s) => s.model)
-						: this.session.modelRegistry.getAvailable();
+		const getModelArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
+			if (modelAutocompleteItems.length === 0) {
+				return null;
+			}
 
-				if (models.length === 0) {
-					return commandMatches.length > 0 ? commandMatches : null;
-				}
+			const filtered = fuzzyFilter(modelAutocompleteItems, prefix, (item) => `${item.id} ${item.provider}`);
+			const modelMatches = filtered.map((item) => ({
+				value: item.label,
+				label: item.id,
+				description: item.provider,
+			}));
 
-				// Create items with provider/id format
-				const items = models.map((m) => ({
-					id: m.id,
-					provider: m.provider,
-					label: `${m.provider}/${m.id}`,
-				}));
+			return modelMatches.length > 0 ? modelMatches : null;
+		};
 
-				// Fuzzy filter by model ID + provider (allows "opus anthropic" to match)
-				const filtered = fuzzyFilter(items, prefix, (item) => `${item.id} ${item.provider}`);
-				const modelMatches = filtered.map((item) => ({
-					value: item.label,
-					label: item.id,
-					description: item.provider,
-				}));
-
-				const completions = [...commandMatches, ...modelMatches];
-				return completions.length > 0 ? completions : null;
-			};
-		}
+		const modelNamespaceScopes = ["default", "plan", "extension:answer"];
+		const modelNamespaceCommands: SlashCommand[] = [
+			{
+				name: "model:list",
+				description: "List available models in chat",
+			},
+			{
+				name: "model:show",
+				description: "Show configured model selections",
+			},
+			...modelNamespaceScopes.map((scope) => ({
+				name: `model:${scope}`,
+				description: `Configure model selection for ${scope} scope`,
+				getArgumentCompletions: getModelArgumentCompletions,
+			})),
+		];
+		slashCommands.push(...modelNamespaceCommands);
 
 		const contextCommand = slashCommands.find((command) => command.name === "context");
 		if (contextCommand) {
@@ -2243,10 +2249,9 @@ export class InteractiveMode {
 				await this.showModelsSelector();
 				return;
 			}
-			if (text === "/model" || text.startsWith("/model ")) {
-				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
+			if (text === "/model" || text.startsWith("/model ") || text.startsWith("/model:")) {
 				this.editor.setText("");
-				await this.handleModelCommand(searchTerm);
+				await this.handleModelCommand(text);
 				return;
 			}
 			if (text === "/thinking" || text.startsWith("/thinking ")) {
@@ -3704,28 +3709,135 @@ export class InteractiveMode {
 		this.showStatus(`Thinking level: ${effectiveLevel} (requested ${requestedLevel} is unavailable for this model)`);
 	}
 
-	private async handleModelCommand(searchTerm?: string): Promise<void> {
-		const trimmedSearchTerm = searchTerm?.trim();
-		if (!trimmedSearchTerm) {
-			this.showModelSelector();
+	private normalizeModelScope(scope: string): string {
+		const normalized = scope.trim().toLowerCase();
+		return normalized === "normal" ? "default" : normalized;
+	}
+
+	private parseModelCommandInput(
+		commandText: string,
+	):
+		| { type: "active"; searchTerm: string | undefined }
+		| { type: "list" }
+		| { type: "show" }
+		| { type: "scope"; scope: string; searchTerm: string | undefined }
+		| undefined {
+		if (commandText === "/model") {
+			return { type: "active", searchTerm: undefined };
+		}
+
+		if (commandText.startsWith("/model ")) {
+			const searchTerm = commandText.slice(7).trim() || undefined;
+			if (searchTerm?.toLowerCase() === "list" || searchTerm?.toLowerCase() === "show") {
+				this.showWarning(`Use /model:${searchTerm.toLowerCase()} (colon syntax)`);
+				return undefined;
+			}
+			return { type: "active", searchTerm };
+		}
+
+		if (!commandText.startsWith("/model:")) {
+			return undefined;
+		}
+
+		const rest = commandText.slice(7).trim();
+		if (!rest) {
+			this.showWarning("Usage: /model:list | /model:show | /model:<scope> [provider/model]");
+			return undefined;
+		}
+
+		if (rest === "list") {
+			return { type: "list" };
+		}
+		if (rest === "show") {
+			return { type: "show" };
+		}
+
+		const firstSpace = rest.indexOf(" ");
+		const rawScope = (firstSpace === -1 ? rest : rest.slice(0, firstSpace)).trim();
+		if (!rawScope) {
+			this.showWarning("Usage: /model:list | /model:show | /model:<scope> [provider/model]");
+			return undefined;
+		}
+
+		const scope = this.normalizeModelScope(rawScope);
+		if (scope === "list" || scope === "show") {
+			this.showWarning(`Use /model:${scope} (no additional scope)`);
+			return undefined;
+		}
+		const searchTerm = firstSpace === -1 ? undefined : rest.slice(firstSpace + 1).trim() || undefined;
+		return { type: "scope", scope, searchTerm };
+	}
+
+	private getConfiguredModelForScope(scope: string): Model<any> | undefined {
+		const selection = this.settingsManager.getModelSelection(scope);
+		if (!selection) {
+			return undefined;
+		}
+		return this.session.modelRegistry.find(selection.provider, selection.modelId);
+	}
+
+	private showModelSelections(): void {
+		const configuredSelections = this.settingsManager.getModelSelections();
+		const scopes = Object.keys(configuredSelections).sort();
+		if (scopes.length === 0) {
+			this.showStatus("No configured model selections");
 			return;
 		}
 
-		if (trimmedSearchTerm.toLowerCase() === "list") {
-			await this.showModelList();
+		const lines = scopes.map((scope) => {
+			const selection = configuredSelections[scope];
+			return `${scope}: ${selection.provider}/${selection.modelId}`;
+		});
+		const output = [theme.bold("Configured Model Selections"), "", ...lines].join("\n");
+
+		this.chatContainer.addChild(new Spacer(1));
+		this.chatContainer.addChild(new Text(output, 1, 0));
+		this.ui.requestRender();
+	}
+
+	private async setModelSelectionForScope(scope: string, model: Model<any>): Promise<void> {
+		this.settingsManager.setModelSelection(scope, model.provider, model.id);
+		this.setupAutocomplete(this.fdPath);
+		this.showStatus(`Model (${scope}): ${model.provider}/${model.id}`);
+	}
+
+	private async handleModelCommand(commandText: string): Promise<void> {
+		const parsed = this.parseModelCommandInput(commandText);
+		if (!parsed) {
+			return;
+		}
+
+		if (parsed.type === "list") {
+			await this.showModelList("default");
+			return;
+		}
+		if (parsed.type === "show") {
+			this.showModelSelections();
+			return;
+		}
+
+		const switchActiveModel = parsed.type === "active";
+		const scope = parsed.type === "scope" ? parsed.scope : "default";
+		const trimmedSearchTerm = parsed.searchTerm?.trim();
+		if (!trimmedSearchTerm) {
+			this.showModelSelector(undefined, { scope, switchActiveModel });
 			return;
 		}
 
 		const model = await this.findExactModelMatch(trimmedSearchTerm);
 		if (model) {
-			await this.selectModelAndMaybeAccount(model);
+			if (switchActiveModel) {
+				await this.selectModelAndMaybeAccount(model);
+			} else {
+				await this.setModelSelectionForScope(scope, model);
+			}
 			return;
 		}
 
-		this.showModelSelector(trimmedSearchTerm);
+		this.showModelSelector(trimmedSearchTerm, { scope, switchActiveModel });
 	}
 
-	private async showModelList(): Promise<void> {
+	private async showModelList(scope: string = "default"): Promise<void> {
 		const models = await this.getModelCandidates();
 		if (models.length === 0) {
 			this.showStatus("No models available");
@@ -3733,6 +3845,7 @@ export class InteractiveMode {
 		}
 
 		const currentModel = this.session.model;
+		const configuredModel = this.settingsManager.getModelSelection(scope);
 		const sortedModels = [...models].sort((a, b) => {
 			if (a.provider !== b.provider) {
 				return a.provider.localeCompare(b.provider);
@@ -3744,18 +3857,26 @@ export class InteractiveMode {
 		const shownModels = sortedModels.slice(0, maxRows);
 		const providerCount = new Set(sortedModels.map((candidate) => candidate.provider)).size;
 		const lines = shownModels.map((candidate) => {
-			const isCurrent =
-				currentModel && candidate.provider === currentModel.provider && candidate.id === currentModel.id
-					? " (current)"
-					: "";
-			return `${candidate.provider}/${candidate.id}${isCurrent}`;
+			const tags: string[] = [];
+			if (currentModel && candidate.provider === currentModel.provider && candidate.id === currentModel.id) {
+				tags.push("current");
+			}
+			if (
+				configuredModel &&
+				candidate.provider === configuredModel.provider &&
+				candidate.id === configuredModel.modelId
+			) {
+				tags.push(`selected:${scope}`);
+			}
+			const suffix = tags.length > 0 ? ` (${tags.join(", ")})` : "";
+			return `${candidate.provider}/${candidate.id}${suffix}`;
 		});
 		if (sortedModels.length > shownModels.length) {
 			lines.push(`... ${sortedModels.length - shownModels.length} more model(s)`);
 		}
 
 		const output = [
-			theme.bold("Available Models"),
+			theme.bold(`Available Models (${scope})`),
 			`${sortedModels.length} model(s) across ${providerCount} provider(s)`,
 			"",
 			...lines,
@@ -3836,17 +3957,28 @@ export class InteractiveMode {
 		this.footer.invalidate();
 		this.ui.requestRender();
 	}
-	private showModelSelector(initialSearchInput?: string): void {
+	private showModelSelector(
+		initialSearchInput?: string,
+		options?: { scope?: string; switchActiveModel?: boolean },
+	): void {
+		const scope = this.normalizeModelScope(options?.scope ?? "default");
+		const switchActiveModel = options?.switchActiveModel ?? true;
+		const configuredModel = this.getConfiguredModelForScope(scope);
+		const currentModel = configuredModel ?? this.session.model;
+
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
 				this.ui,
-				this.session.model,
-				this.settingsManager,
+				currentModel,
 				this.session.modelRegistry,
 				this.session.scopedModels,
 				async (model) => {
 					done();
-					await this.selectModelAndMaybeAccount(model);
+					if (switchActiveModel) {
+						await this.selectModelAndMaybeAccount(model);
+						return;
+					}
+					await this.setModelSelectionForScope(scope, model);
 				},
 				() => {
 					done();

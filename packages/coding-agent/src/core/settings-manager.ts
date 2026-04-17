@@ -43,6 +43,13 @@ export interface MarkdownSettings {
 	codeBlockIndent?: string; // default: "  "
 }
 
+export interface ModelSelection {
+	provider: string;
+	model: string;
+}
+
+export type ModelSelectionMap = Record<string, ModelSelection>;
+
 export type TransportSetting = Transport;
 
 /**
@@ -64,6 +71,7 @@ export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
+	modelSelections?: ModelSelectionMap; // Named model selections (e.g., default, plan, extension:answer)
 	defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	transport?: TransportSetting; // default: "sse"
 	steeringMode?: "all" | "one-at-a-time";
@@ -349,6 +357,28 @@ export class SettingsManager {
 			}
 		}
 
+		const existingModelSelections =
+			typeof settings.modelSelections === "object" &&
+			settings.modelSelections !== null &&
+			!Array.isArray(settings.modelSelections)
+				? (settings.modelSelections as ModelSelectionMap)
+				: {};
+		settings.modelSelections = existingModelSelections;
+
+		if (
+			typeof settings.defaultProvider === "string" &&
+			typeof settings.defaultModel === "string" &&
+			existingModelSelections.default === undefined
+		) {
+			settings.modelSelections = {
+				...existingModelSelections,
+				default: {
+					provider: settings.defaultProvider,
+					model: settings.defaultModel,
+				},
+			};
+		}
+
 		return settings as Settings;
 	}
 
@@ -537,32 +567,102 @@ export class SettingsManager {
 		return this.settings.sessionDir;
 	}
 
+	private normalizeModelSelectionScope(scope: string): string {
+		return scope.trim().toLowerCase();
+	}
+
+	getModelSelection(scope: string): { provider: string; modelId: string } | undefined {
+		const normalizedScope = this.normalizeModelSelectionScope(scope);
+		if (!normalizedScope) {
+			return undefined;
+		}
+
+		const scoped = this.settings.modelSelections?.[normalizedScope];
+		if (scoped?.provider && scoped.model) {
+			return { provider: scoped.provider, modelId: scoped.model };
+		}
+
+		if (normalizedScope === "default" && this.settings.defaultProvider && this.settings.defaultModel) {
+			return { provider: this.settings.defaultProvider, modelId: this.settings.defaultModel };
+		}
+
+		return undefined;
+	}
+
+	getModelSelections(): Record<string, { provider: string; modelId: string }> {
+		const result: Record<string, { provider: string; modelId: string }> = {};
+		for (const [scope, selection] of Object.entries(this.settings.modelSelections ?? {})) {
+			if (!selection?.provider || !selection.model) {
+				continue;
+			}
+			result[scope] = { provider: selection.provider, modelId: selection.model };
+		}
+		if (!result.default && this.settings.defaultProvider && this.settings.defaultModel) {
+			result.default = { provider: this.settings.defaultProvider, modelId: this.settings.defaultModel };
+		}
+		return result;
+	}
+
+	setModelSelection(scope: string, provider: string, modelId: string): void {
+		const normalizedScope = this.normalizeModelSelectionScope(scope);
+		if (!normalizedScope) {
+			return;
+		}
+
+		if (!this.globalSettings.modelSelections) {
+			this.globalSettings.modelSelections = {};
+		}
+		this.globalSettings.modelSelections[normalizedScope] = { provider, model: modelId };
+		this.markModified("modelSelections", normalizedScope);
+
+		if (normalizedScope === "default") {
+			this.globalSettings.defaultProvider = provider;
+			this.globalSettings.defaultModel = modelId;
+			this.markModified("defaultProvider");
+			this.markModified("defaultModel");
+		}
+
+		this.save();
+	}
+
 	getDefaultProvider(): string | undefined {
-		return this.settings.defaultProvider;
+		return this.getModelSelection("default")?.provider ?? this.settings.defaultProvider;
 	}
 
 	getDefaultModel(): string | undefined {
-		return this.settings.defaultModel;
+		return this.getModelSelection("default")?.modelId ?? this.settings.defaultModel;
 	}
 
 	setDefaultProvider(provider: string): void {
 		this.globalSettings.defaultProvider = provider;
 		this.markModified("defaultProvider");
+		const modelId = this.globalSettings.defaultModel ?? this.settings.defaultModel;
+		if (modelId) {
+			if (!this.globalSettings.modelSelections) {
+				this.globalSettings.modelSelections = {};
+			}
+			this.globalSettings.modelSelections.default = { provider, model: modelId };
+			this.markModified("modelSelections", "default");
+		}
 		this.save();
 	}
 
 	setDefaultModel(modelId: string): void {
 		this.globalSettings.defaultModel = modelId;
 		this.markModified("defaultModel");
+		const provider = this.globalSettings.defaultProvider ?? this.settings.defaultProvider;
+		if (provider) {
+			if (!this.globalSettings.modelSelections) {
+				this.globalSettings.modelSelections = {};
+			}
+			this.globalSettings.modelSelections.default = { provider, model: modelId };
+			this.markModified("modelSelections", "default");
+		}
 		this.save();
 	}
 
 	setDefaultModelAndProvider(provider: string, modelId: string): void {
-		this.globalSettings.defaultProvider = provider;
-		this.globalSettings.defaultModel = modelId;
-		this.markModified("defaultProvider");
-		this.markModified("defaultModel");
-		this.save();
+		this.setModelSelection("default", provider, modelId);
 	}
 
 	getSteeringMode(): "all" | "one-at-a-time" {

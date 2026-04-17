@@ -73,13 +73,26 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		}
 	}
 
-	function togglePlanMode(ctx: ExtensionContext): void {
+	async function applyConfiguredPlanModel(ctx: ExtensionContext, notify: boolean): Promise<void> {
+		const planModel = ctx.getConfiguredModel?.("plan");
+		if (!planModel) {
+			return;
+		}
+
+		const changed = await pi.setModel(planModel);
+		if (changed && notify) {
+			ctx.ui.notify(`Plan mode model: ${planModel.provider}/${planModel.id}`);
+		}
+	}
+
+	async function togglePlanMode(ctx: ExtensionContext): Promise<void> {
 		planModeEnabled = !planModeEnabled;
 		executionMode = false;
 		todoItems = [];
 
 		if (planModeEnabled) {
 			pi.setActiveTools(PLAN_MODE_TOOLS);
+			await applyConfiguredPlanModel(ctx, true);
 			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
 		} else {
 			pi.setActiveTools(NORMAL_MODE_TOOLS);
@@ -334,6 +347,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		if (planModeEnabled) {
 			pi.setActiveTools(PLAN_MODE_TOOLS);
+			await applyConfiguredPlanModel(ctx, false);
 		}
 		updateStatus(ctx);
 	});

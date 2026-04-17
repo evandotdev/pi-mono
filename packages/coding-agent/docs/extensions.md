@@ -767,6 +767,15 @@ ctx.sessionManager.getLeafId()        // Current leaf entry ID
 
 Access to models and API keys.
 
+`ctx.getConfiguredModel?.(scope)` resolves a named model selection from settings (for example `default`, `plan`, or `extension:answer`) and returns a `Model` if available.
+
+```typescript
+const planModel = ctx.getConfiguredModel?.("plan");
+if (planModel) {
+  await pi.setModel(planModel);
+}
+```
+
 ### ctx.signal
 
 The current agent abort signal, or `undefined` when no agent turn is active.

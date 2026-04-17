@@ -163,7 +163,8 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | OAuth authentication |
-| `/model` | Switch models |
+| `/model` | Switch active model (`/model:list`, `/model:show`) |
+| `/model:<scope>` | Configure named model selections (e.g., `/model:plan`, `/model:extension:answer`) |
 | `/thinking [off\|minimal\|low\|medium\|high\|xhigh]` | Show or set the thinking level |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |

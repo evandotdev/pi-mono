@@ -208,6 +208,7 @@ export class ExtensionRunner {
 	private modelRegistry: ModelRegistry;
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<any> | undefined = () => undefined;
+	private getConfiguredModelFn: (scope: string) => Model<any> | undefined = () => undefined;
 	private isIdleFn: () => boolean = () => true;
 	private getSignalFn: () => AbortSignal | undefined = () => undefined;
 	private waitForIdleFn: () => Promise<void> = async () => {};
@@ -266,6 +267,7 @@ export class ExtensionRunner {
 
 		// Context actions (required)
 		this.getModel = contextActions.getModel;
+		this.getConfiguredModelFn = contextActions.getConfiguredModel ?? (() => undefined);
 		this.isIdleFn = contextActions.isIdle;
 		this.getSignalFn = contextActions.getSignal;
 		this.abortFn = contextActions.abort;
@@ -543,6 +545,7 @@ export class ExtensionRunner {
 			get model() {
 				return getModel();
 			},
+			getConfiguredModel: (scope: string) => this.getConfiguredModelFn(scope),
 			isIdle: () => this.isIdleFn(),
 			signal: this.getSignalFn(),
 			abort: () => this.abortFn(),

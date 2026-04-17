@@ -17,9 +17,24 @@ Edit directly or use `/settings` for common options.
 |---------|------|---------|-------------|
 | `defaultProvider` | string | - | Default provider (e.g., `"anthropic"`, `"openai"`) |
 | `defaultModel` | string | - | Default model ID |
+| `modelSelections` | object | - | Named model selections, e.g. `default`, `plan`, `extension:answer` |
 | `defaultThinkingLevel` | string | - | `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"` |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in output |
 | `thinkingBudgets` | object | - | Custom token budgets per thinking level |
+
+#### modelSelections
+
+```json
+{
+  "modelSelections": {
+    "default": { "provider": "anthropic", "model": "claude-sonnet-4-5" },
+    "plan": { "provider": "openai", "model": "gpt-5.1-codex" },
+    "extension:answer": { "provider": "anthropic", "model": "claude-opus-4-5" }
+  }
+}
+```
+
+Configure interactively with `/model:<scope>` (for example `/model:plan`, `/model:default`, `/model:extension:answer`).
 
 #### thinkingBudgets
 

@@ -23,6 +23,7 @@
 - Added multi-account OAuth selection flows in interactive mode, including account selection when switching models and richer account labels in login/model pickers.
 - Added slash commands `/thinking <off|minimal|low|medium|high|xhigh>` and `/context [show|clear]` for direct reasoning-level control and context inspection/clearing.
 - Added `/model list` support to print available models in chat.
+- Added named model selection commands via `/model:<scope>` (for example `/model:default`, `/model:plan`, `/model:extension:answer`) with persisted `settings.json` `modelSelections` entries.
 - Added `/generate-models` slash command to run pi-ai model generation from interactive mode.
 - Added `/usage` slash command to show OAuth provider usage across all accounts with utilization windows and reset timing.
 - Added `/share:system-prompt` to export the current effective system prompt as a secret GitHub gist with stable SHA-256 metadata for prompt fingerprinting.
@@ -38,7 +39,9 @@
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 - Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
 - Changed footer OAuth usage rendering to show all available usage windows (for example `5h` and `7d`) with clearer utilization colorization.
+- Changed bundled `plan-mode` extension to apply the configured `plan` model selection when entering or restoring plan mode.
 - Changed prompt-template command handling to treat `/prompt:<template>` as the namespaced form while preserving `/<template>` compatibility.
+- Changed model command namespace to colon-style subcommands (`/model:list`, `/model:show`, `/model:<scope>`), and removed space-style `/model list` and `/model show`.
 - Changed session command docs and dispatch to prefer namespaced `/session:*` forms while preserving short aliases.
 
 ### Fixed

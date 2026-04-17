@@ -275,6 +275,8 @@ export interface ExtensionContext {
 	modelRegistry: ModelRegistry;
 	/** Current model (may be undefined) */
 	model: Model<any> | undefined;
+	/** Resolve a configured model selection by scope (for example: default, plan, extension:answer). */
+	getConfiguredModel?: (scope: string) => Model<any> | undefined;
 	/** Whether the agent is idle (not streaming) */
 	isIdle(): boolean;
 	/** The current abort signal, or undefined when the agent is not streaming. */
@@ -1390,6 +1392,7 @@ export interface ExtensionContextActions {
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (options?: CompactOptions) => void;
 	getSystemPrompt: () => string;
+	getConfiguredModel?: (scope: string) => Model<any> | undefined;
 }
 
 /**

@@ -289,6 +289,48 @@ describe("SettingsManager", () => {
 		});
 	});
 
+	describe("model selections", () => {
+		it("should set and read named model selections", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setModelSelection("plan", "openai", "gpt-5.1-codex");
+			await manager.flush();
+
+			expect(manager.getModelSelection("plan")).toEqual({
+				provider: "openai",
+				modelId: "gpt-5.1-codex",
+			});
+		});
+
+		it("should keep default model/provider in sync with default model selection", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			manager.setDefaultModelAndProvider("anthropic", "claude-sonnet-4-5");
+			await manager.flush();
+
+			expect(manager.getDefaultProvider()).toBe("anthropic");
+			expect(manager.getDefaultModel()).toBe("claude-sonnet-4-5");
+			expect(manager.getModelSelection("default")).toEqual({
+				provider: "anthropic",
+				modelId: "claude-sonnet-4-5",
+			});
+		});
+
+		it("should migrate legacy defaultProvider/defaultModel to modelSelections.default", () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({
+					defaultProvider: "openai",
+					defaultModel: "gpt-4o",
+				}),
+			);
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			expect(manager.getModelSelection("default")).toEqual({
+				provider: "openai",
+				modelId: "gpt-4o",
+			});
+		});
+	});
+
 	describe("getSessionDir", () => {
 		it("should return undefined when not set", () => {
 			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ theme: "dark" }));
