@@ -93,6 +93,14 @@ function selectExtractionModel(
 	return modelRegistry.getAll().find((model) => model.provider === "openai-codex") ?? null;
 }
 
+function getAnsweringStatusText(ctx: ExtensionContext, thinkingLevel: string): string | undefined {
+	const answerModel = ctx.getConfiguredModel?.("extension:answer") ?? ctx.model;
+	if (!answerModel) {
+		return undefined;
+	}
+	return `Answering with (${answerModel.provider}) ${answerModel.id} • ${thinkingLevel}`;
+}
+
 /**
  * Parse the JSON response from the LLM.
  */
@@ -443,6 +451,8 @@ class QnAComponent implements Component {
 }
 
 export default function (pi: ExtensionAPI) {
+	let answerStatusActive = false;
+
 	const answerHandler = async (ctx: ExtensionContext) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify("answer requires interactive mode", "error");
@@ -568,6 +578,12 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			// Send the answers directly as a message and trigger a turn
+			const answeringStatus = getAnsweringStatusText(ctx, pi.getThinkingLevel());
+			if (answeringStatus) {
+				ctx.ui.setStatus("answer-mode", ctx.ui.theme.fg("accent", answeringStatus));
+				answerStatusActive = true;
+			}
+
 			pi.sendMessage(
 				{
 					customType: "answers",
@@ -586,5 +602,13 @@ export default function (pi: ExtensionAPI) {
 	pi.registerShortcut("ctrl+.", {
 		description: "Extract and answer questions",
 		handler: answerHandler,
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		if (!answerStatusActive) {
+			return;
+		}
+		answerStatusActive = false;
+		ctx.ui.setStatus("answer-mode", undefined);
 	});
 }

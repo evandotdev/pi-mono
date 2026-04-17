@@ -177,6 +177,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		} satisfies PersistedPlanState);
 	}
 
+	function getPlanningStatusText(ctx: ExtensionContext): string | undefined {
+		const planningModel = ctx.getConfiguredModel?.("plan") ?? ctx.model;
+		if (!planningModel) {
+			return undefined;
+		}
+		return `Planning with (${planningModel.provider}) ${planningModel.id} • ${pi.getThinkingLevel()}`;
+	}
+
 	function updateStatus(ctx: ExtensionContext): void {
 		if (mode === "off") {
 			ctx.ui.setStatus("plan-mode", undefined);
@@ -184,11 +192,17 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		const label =
-			mode === "approved"
-				? ctx.ui.theme.fg("accent", "plan approved")
-				: ctx.ui.theme.fg("warning", "plan mode");
-		ctx.ui.setStatus("plan-mode", label);
+		const statusText = getPlanningStatusText(ctx);
+		if (statusText) {
+			const color = mode === "approved" ? "accent" : "warning";
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg(color, statusText));
+		} else {
+			const label =
+				mode === "approved"
+					? ctx.ui.theme.fg("accent", "plan approved")
+					: ctx.ui.theme.fg("warning", "plan mode");
+			ctx.ui.setStatus("plan-mode", label);
+		}
 		ctx.ui.setWidget("plan-mode", buildStatusLines(mode, anchorLeafId, approvedPlanText));
 	}
 
@@ -454,6 +468,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			enablePlanningTools();
 		}
 		updateStatus(ctx);
+	});
+
+	pi.on("model_select", async (_event, ctx) => {
+		if (mode === "planning" || mode === "approved") {
+			updateStatus(ctx);
+		}
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
