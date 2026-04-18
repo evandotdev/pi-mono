@@ -1,3 +1,4 @@
+.superset/
 .worktrees/
 node_modules/
 dist/
