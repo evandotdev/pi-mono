@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { visibleWidth } from "@mariozechner/pi-tui";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.js";
@@ -64,16 +65,22 @@ function stripAnsi(text: string): string {
 	return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-function createFooterData(providerCount: number): ReadonlyFooterDataProvider {
+function createFooterData(
+	providerCount: number,
+	options?: {
+		extensionStatuses?: Map<string, string>;
+		providerUsage?: Map<string, ProviderUsage>;
+	},
+): ReadonlyFooterDataProvider {
 	const provider = {
 		getGitBranch: () => "main",
-		getExtensionStatuses: () => new Map<string, string>(),
+		getExtensionStatuses: () => options?.extensionStatuses ?? new Map<string, string>(),
 		getAvailableProviderCount: () => providerCount,
 		onBranchChange: (callback: () => void) => {
 			void callback;
 			return () => {};
 		},
-		getProviderUsage: () => new Map(),
+		getProviderUsage: () => options?.providerUsage ?? new Map<string, ProviderUsage>(),
 		onUsageChange: (callback: () => void) => {
 			void callback;
 			return () => {};
@@ -156,7 +163,7 @@ describe("FooterComponent width handling", () => {
 		expect(plainSecondLine).toContain("Cost:");
 	});
 
-	it("keeps the pi version on the left of token stats", () => {
+	it("keeps the Pi version on the third line when no sandbox status is present", () => {
 		const width = 120;
 		const session = createSession({
 			sessionName: "",
@@ -176,13 +183,67 @@ describe("FooterComponent width handling", () => {
 		expect(visibleWidth(lines[2])).toBeLessThanOrEqual(width);
 
 		const plainThirdLine = stripAnsi(lines[2]);
-		const separatorIndex = plainThirdLine.indexOf("│");
-		expect(separatorIndex).toBeGreaterThan(0);
+		expect(plainThirdLine).toMatch(/^Pi:/);
+		expect(plainThirdLine).not.toContain("Tokens:");
+	});
 
-		const prefixBeforeSeparator = plainThirdLine.slice(0, separatorIndex);
-		expect(prefixBeforeSeparator).toMatch(/^Pi:/);
-		expect(prefixBeforeSeparator).not.toMatch(/ {2,}$/);
-		expect(plainThirdLine).toContain("Tokens:");
-		expect(plainThirdLine.indexOf("Pi:")).toBeLessThan(plainThirdLine.indexOf("Tokens:"));
+	it("filters usage windows to duration-style names in the compact footer", () => {
+		const width = 120;
+		const session = createSession({
+			sessionName: "",
+			modelId: "gpt-5.4",
+			provider: "openai",
+		});
+		const providerUsage = new Map<string, ProviderUsage>([
+			[
+				"openai",
+				{
+					windows: {
+						"5h": { utilizationPercent: 72, resetsAt: Date.now() + 5 * 60 * 60 * 1000 },
+						"7d": { utilizationPercent: 13, resetsAt: Date.now() + 7 * 24 * 60 * 60 * 1000 },
+						"GPT-5.3-Codex-Spark": { utilizationPercent: 99, resetsAt: Date.now() + 60 * 60 * 1000 },
+						primary: { utilizationPercent: 50, resetsAt: Date.now() + 30 * 60 * 1000 },
+					},
+				},
+			],
+		]);
+		const footer = new FooterComponent(session, createFooterData(1, { providerUsage }));
+
+		const lines = footer.render(width);
+		const plainFirstLine = stripAnsi(lines[0]);
+		expect(plainFirstLine).toContain("Usage:");
+		expect(plainFirstLine).toContain("5h");
+		expect(plainFirstLine).toContain("7d");
+		expect(plainFirstLine).not.toContain("GPT-5.3-Codex-Spark");
+		expect(plainFirstLine).not.toContain("primary");
+	});
+
+	it("renders sandbox and planning statuses on separate footer rows", () => {
+		const width = 120;
+		const session = createSession({
+			sessionName: "",
+			modelId: "test-model",
+			provider: "test",
+		});
+		const footer = new FooterComponent(
+			session,
+			createFooterData(1, {
+				extensionStatuses: new Map([
+					["sandbox", "🔒 Sandbox: 2 domains, 1 write path"],
+					["plan-mode", "Planning with 3 steps"],
+				]),
+			}),
+		);
+
+		const lines = footer.render(width);
+		expect(visibleWidth(lines[2])).toBeLessThanOrEqual(width);
+		expect(visibleWidth(lines[3])).toBeLessThanOrEqual(width);
+
+		const sandboxLine = stripAnsi(lines[2]);
+		const planningLine = stripAnsi(lines[3]);
+		expect(sandboxLine).toContain("Sandbox");
+		expect(sandboxLine).not.toContain("Planning with");
+		expect(planningLine).toContain("Planning with 3 steps");
+		expect(planningLine).not.toContain("Sandbox");
 	});
 });

@@ -1,3 +1,4 @@
+import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { spawnSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
@@ -290,9 +291,50 @@ function colorizePercent(percentText: string, utilizationPercent: number): strin
 	return green(percentText);
 }
 
+type UsageWindow = ProviderUsage["windows"][string];
+
+function isDurationWindowName(windowName: string): boolean {
+	return /^\d+(?:m|h|d|w)$/i.test(windowName.trim());
+}
+
+function getDurationUsageWindows(currentUsage: ProviderUsage): Array<[string, UsageWindow]> {
+	return Object.entries(currentUsage.windows)
+		.filter(([windowName]) => isDurationWindowName(windowName))
+		.sort((a, b) => {
+			const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+			const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
+			if (resetA !== resetB) return resetA - resetB;
+			return a[0].localeCompare(b[0]);
+		});
+}
+
+function formatCompactUsageSegment(
+	currentUsage: ProviderUsage | undefined,
+	label: (text: string) => string,
+): string | undefined {
+	if (!currentUsage) return undefined;
+
+	const windows = getDurationUsageWindows(currentUsage);
+	if (windows.length === 0) return undefined;
+
+	const usageParts = windows.map(([windowName, window]) => {
+		const percentText = colorizePercent(`${Math.round(window.utilizationPercent)}%`, window.utilizationPercent);
+		return `${percentText}${theme.fg("dim", `/${windowName}`)}`;
+	});
+
+	const soonestReset = windows
+		.map(([, window]) => window.resetsAt)
+		.filter((resetsAt): resetsAt is number => resetsAt !== undefined)
+		.sort((a, b) => a - b)[0];
+	const resetText = soonestReset !== undefined ? formatResetCountdown(soonestReset) : null;
+	const usageValue = `${usageParts.join(" ")}${resetText ? ` ${theme.fg("dim", resetText)}` : ""}`;
+	return `${label("Usage")}${usageValue}`;
+}
+
 /**
- * Footer component that shows cwd/session/model on the first line, context/usage/cost on the second,
- * pi version plus token stats on the third, and extension statuses below that.
+ * Footer component that shows cwd/session/model/usage on the first line,
+ * context/cost/tokens on the second, sandbox/Pi on the third,
+ * and remaining extension statuses on separate rows below.
  */
 export class FooterComponent implements Component {
 	private static readonly GIT_SUMMARY_TTL_MS = 1500;
@@ -431,52 +473,19 @@ export class FooterComponent implements Component {
 				: colorizePercent(contextPercentText, clampedContextPercent);
 		const contextSegment = `${label("Ctx")}${buildContextBar(clampedContextPercent)} ${contextPercentDisplay} ${theme.fg("dim", `of ${formatTokens(contextWindow)}`)}`;
 
-		let usageSegment: string | undefined;
 		const currentProvider = state.model?.provider;
 		const providerUsage = this.footerData.getProviderUsage();
 		const currentUsage = currentProvider ? providerUsage.get(currentProvider) : undefined;
-		if (currentUsage) {
-			const windows = Object.entries(currentUsage.windows).sort((a, b) => {
-				const resetA = a[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
-				const resetB = b[1].resetsAt ?? Number.MAX_SAFE_INTEGER;
-				if (resetA !== resetB) return resetA - resetB;
-				return a[0].localeCompare(b[0]);
-			});
-
-			if (windows.length > 0) {
-				const usageParts = windows.map(([windowName, window]) => {
-					const percentText = colorizePercent(
-						`${Math.round(window.utilizationPercent)}%`,
-						window.utilizationPercent,
-					);
-					return `${percentText}${theme.fg("dim", `/${windowName}`)}`;
-				});
-
-				const soonestReset = windows
-					.map(([, window]) => window.resetsAt)
-					.filter((resetsAt): resetsAt is number => resetsAt !== undefined)
-					.sort((a, b) => a - b)[0];
-				const resetText = soonestReset !== undefined ? formatResetCountdown(soonestReset) : null;
-				const usageValue = `${usageParts.join(" ")}${resetText ? ` ${theme.fg("dim", resetText)}` : ""}`;
-				usageSegment = `${label("Use")}${usageValue}`;
-			}
-		}
+		const usageSegment = formatCompactUsageSegment(currentUsage, label);
 
 		const line1LeftSection = joinSegments([line1Left, modelInfo], separator);
-		const line1RightSection = usageSegment ?? "";
-		const line1 = line1RightSection
-			? fitLeftAndRight(line1LeftSection, line1RightSection, width, separator)
+		const line1 = usageSegment
+			? fitLeftAndRight(line1LeftSection, usageSegment, width, separator)
 			: truncateToWidth(line1LeftSection, width, theme.fg("dim", "..."));
 
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		const costValue = `${theme.fg("dim", formatCost(totalCost))}${usingSubscription ? theme.fg("dim", " (sub)") : ""}`;
 		const costSegment = `${label("Cost")}${costValue}`;
-		const line2 = truncateToWidth(
-			joinSegments([contextSegment, costSegment], separator),
-			width,
-			theme.fg("dim", "..."),
-		);
-
 		const tokenParts: string[] = [];
 		if (totalInput) tokenParts.push(`in ${formatTokens(totalInput)}`);
 		if (totalOutput) tokenParts.push(`out ${formatTokens(totalOutput)}`);
@@ -484,21 +493,28 @@ export class FooterComponent implements Component {
 			tokenParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
 		}
 		const tokensSegment = tokenParts.length > 0 ? `${label("Tokens")}${theme.fg("dim", tokenParts.join(" "))}` : "";
-		const piVersionDisplay = getPiVersionDisplay();
-		const piSegment = piVersionDisplay ? `${label("Pi")}${theme.fg("dim", piVersionDisplay)}` : "";
-		const line3 = truncateToWidth(joinSegments([piSegment, tokensSegment], separator), width, theme.fg("dim", "..."));
-
-		const lines = [line1, line2];
-		if (line3) {
-			lines.push(line3);
-		}
+		const line2 = truncateToWidth(
+			joinSegments([contextSegment, costSegment, tokensSegment], separator),
+			width,
+			theme.fg("dim", "..."),
+		);
 
 		const extensionStatuses = this.footerData.getExtensionStatuses();
-		if (extensionStatuses.size > 0) {
-			const sortedStatuses = Array.from(extensionStatuses.entries())
-				.sort(([a], [b]) => a.localeCompare(b))
-				.map(([, text]) => sanitizeStatusText(text));
-			const statusLine = sortedStatuses.join(" ");
+		const sandboxStatus = sanitizeStatusText(extensionStatuses.get("sandbox") ?? "");
+		const sandboxSegment = sandboxStatus.length > 0 ? sandboxStatus : undefined;
+		const piVersionDisplay = getPiVersionDisplay();
+		const piSegment = piVersionDisplay ? `${label("Pi")}${theme.fg("dim", piVersionDisplay)}` : "";
+		const line3 = fitLeftAndRight(sandboxSegment ?? "", piSegment, width, separator);
+
+		const lines = [line1, line2, line3];
+
+		const statusLines = Array.from(extensionStatuses.entries())
+			.filter(([key, text]) => key !== "sandbox" && text !== undefined)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([, text]) => sanitizeStatusText(text))
+			.filter((text) => text.length > 0);
+
+		for (const statusLine of statusLines) {
 			lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
 		}
 
