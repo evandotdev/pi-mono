@@ -92,6 +92,28 @@ function fitLeftAndRight(left: string, right: string, width: number, separator: 
 	return `${fittedLeft}${" ".repeat(extraPaddingWidth)}${separator}${right}`;
 }
 
+function fitLeftAndAdjacentSuffix(left: string, suffix: string, width: number, separator: string): string {
+	const ellipsis = theme.fg("dim", "...");
+
+	if (!left && !suffix) return "";
+	if (!suffix) return truncateToWidth(left, width, ellipsis);
+	if (!left) return truncateToWidth(suffix, width, ellipsis);
+
+	const suffixWidth = visibleWidth(suffix);
+	const separatorWidth = visibleWidth(separator);
+	if (suffixWidth >= width) {
+		return truncateToWidth(suffix, width, ellipsis);
+	}
+
+	const availableForLeft = width - separatorWidth - suffixWidth;
+	if (availableForLeft <= 0) {
+		return truncateToWidth(suffix, width, ellipsis);
+	}
+
+	const fittedLeft = truncateToWidth(left, availableForLeft, ellipsis);
+	return `${fittedLeft}${separator}${suffix}`;
+}
+
 function runGitCommand(repoDir: string, args: string[]): string | null {
 	const result = spawnSync("git", ["--no-optional-locks", ...args], {
 		cwd: repoDir,
@@ -333,7 +355,7 @@ function formatCompactUsageSegment(
 
 /**
  * Footer component that shows cwd/session/model/usage on the first line,
- * context/cost/tokens on the second, sandbox/Pi on the third,
+ * context/tokens/cost on the second, sandbox/Pi on the third,
  * and remaining extension statuses on separate rows below.
  */
 export class FooterComponent implements Component {
@@ -480,21 +502,16 @@ export class FooterComponent implements Component {
 
 		const line1LeftSection = joinSegments([line1Left, modelInfo], separator);
 		const line1 = usageSegment
-			? fitLeftAndRight(line1LeftSection, usageSegment, width, separator)
+			? fitLeftAndAdjacentSuffix(line1LeftSection, usageSegment, width, separator)
 			: truncateToWidth(line1LeftSection, width, theme.fg("dim", "..."));
 
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		const costValue = `${theme.fg("dim", formatCost(totalCost))}${usingSubscription ? theme.fg("dim", " (sub)") : ""}`;
 		const costSegment = `${label("Cost")}${costValue}`;
-		const tokenParts: string[] = [];
-		if (totalInput) tokenParts.push(`in ${formatTokens(totalInput)}`);
-		if (totalOutput) tokenParts.push(`out ${formatTokens(totalOutput)}`);
-		if (totalCacheRead || totalCacheWrite) {
-			tokenParts.push(`cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`);
-		}
-		const tokensSegment = tokenParts.length > 0 ? `${label("Tokens")}${theme.fg("dim", tokenParts.join(" "))}` : "";
+		const tokensValue = `in ${formatTokens(totalInput)} out ${formatTokens(totalOutput)} cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`;
+		const tokensSegment = `${label("Tokens")}${theme.fg("dim", tokensValue)}`;
 		const line2 = truncateToWidth(
-			joinSegments([contextSegment, costSegment, tokensSegment], separator),
+			joinSegments([contextSegment, tokensSegment, costSegment], separator),
 			width,
 			theme.fg("dim", "..."),
 		);
@@ -510,7 +527,6 @@ export class FooterComponent implements Component {
 
 		const statusLines = Array.from(extensionStatuses.entries())
 			.filter(([key, text]) => key !== "sandbox" && text !== undefined)
-			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([, text]) => sanitizeStatusText(text))
 			.filter((text) => text.length > 0);
 

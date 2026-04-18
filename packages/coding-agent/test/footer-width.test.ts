@@ -160,7 +160,57 @@ describe("FooterComponent width handling", () => {
 		const plainSecondLine = stripAnsi(lines[1]);
 		expect(plainSecondLine).toMatch(/^Ctx:/);
 		expect(plainSecondLine).toContain("12% of 200k");
-		expect(plainSecondLine).toContain("Cost:");
+		expect(plainSecondLine).toContain("Tokens:");
+	});
+
+	it("shows zero token totals on startup", () => {
+		const width = 120;
+		const session = createSession({
+			sessionName: "",
+			modelId: "test-model",
+			provider: "test",
+		});
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(width);
+		expect(visibleWidth(lines[1])).toBeLessThanOrEqual(width);
+
+		const plainSecondLine = stripAnsi(lines[1]);
+		expect(plainSecondLine).toContain("Ctx:");
+		expect(plainSecondLine).toContain("Tokens:");
+		expect(plainSecondLine).toContain("in 0");
+		expect(plainSecondLine).toContain("out 0");
+		expect(plainSecondLine).toContain("R0/W0");
+	});
+
+	it("renders usage immediately after the model section on the first line", () => {
+		const width = 120;
+		const session = createSession({
+			sessionName: "",
+			modelId: "test-model",
+			provider: "test",
+			reasoning: true,
+			thinkingLevel: "high",
+		});
+		const footer = new FooterComponent(
+			session,
+			createFooterData(1, {
+				providerUsage: new Map([
+					[
+						"test",
+						{
+							windows: {
+								"5h": { utilizationPercent: 4, resetsAt: Date.now() + 5 * 60 * 60 * 1000 },
+							},
+						},
+					],
+				]),
+			}),
+		);
+
+		const lines = footer.render(width);
+		const plainFirstLine = stripAnsi(lines[0]);
+		expect(plainFirstLine).toContain("test-model • high │ Usage:");
 	});
 
 	it("keeps the Pi version on the third line when no sandbox status is present", () => {

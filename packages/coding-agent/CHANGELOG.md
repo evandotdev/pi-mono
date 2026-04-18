@@ -38,7 +38,7 @@
 - Changed sandbox runs to use the repo-local minimal `.pi/gitconfig` instead of mounting the host gitconfig.
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 - Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
-- Changed footer OAuth usage rendering to show all available usage windows (for example `5h` and `7d`) with clearer utilization colorization.
+- Changed footer OAuth usage rendering to show duration-style usage windows (for example `5h` and `7d`) with clearer utilization colorization in the compact footer. `/usage` remains exhaustive.
 - Changed bundled `plan-mode` extension to apply the configured `plan` model selection when entering or restoring plan mode.
 - Changed prompt-template command handling to treat `/prompt:<template>` as the namespaced form while preserving `/<template>` compatibility.
 - Changed model command namespace to colon-style subcommands (`/model:list`, `/model:show`, `/model:<scope>`), and removed space-style `/model list` and `/model show`.
@@ -46,6 +46,7 @@
 
 ### Fixed
 
+- Fixed the compact footer to keep usage adjacent to the model, always show token totals, and render sandbox/planning/status lines on separate rows.
 - Fixed Docker sandbox image builds on Linux arm64 by explicitly installing the matching `@typescript/native-preview` platform package before workspace builds.
 - Fixed `pi:stow:mise:install` to mirror `.pi/docker-sandbox.json` into `~/.pi/agent/extensions/docker-sandbox.json`, preserving the full Docker sandbox config and pinning `gitconfig` to the checkout path so `mise run pi` works from other directories.
 - Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
