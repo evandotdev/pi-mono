@@ -16,7 +16,8 @@
         "pattern": ".env.prod",
         "description": "production environment secrets"
       },
-      { "pattern": ".dev.vars", "description": "dev environment secrets" }
+      { "pattern": ".dev.vars", "description": "dev environment secrets" },
+      { "pattern": "authorized_keys", "description": "authorized SSH keys" }
     ],
     "readOnly": [],
     "noDelete": []
