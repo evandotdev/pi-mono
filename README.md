@@ -71,6 +71,9 @@ I regularly publish my own `pi-mono` work sessions here:
 - Slash command grouping updates:
   - session commands now support namespaced forms (`/session:new`, `/session:resume`, `/session:name`, `/session:rename`) with short aliases retained (`/new`, `/resume`, `/name`)
   - prompt templates support namespaced invocation via `/prompt:<template>` in addition to `/<template>`
+- Planning workflow simplification:
+  - removed the bundled `plan-mode/` extension
+  - use [.pi/prompts/plan.md](.pi/prompts/plan.md) via `/prompt:plan` for lightweight planning
 - Stow automation for machine setup:
   - `pi:stow:install` / `pi:stow:uninstall` for linking repo `.pi` resources into `~/.pi`
   - `pi:stow:mise:install` / `pi:stow:mise:uninstall` for global `mise` task wrappers under `~/.config/mise`
@@ -79,7 +82,6 @@ I regularly publish my own `pi-mono` work sessions here:
 
 The current bundled set is below; legacy `diff.ts` and `files.ts` are no longer bundled.
 
-- [plan-mode](.pi/extensions/plan-mode/) branches planning into a separate session tree with `/plan` and `Ctrl+Alt+P`, approval, and implementation handoff.
 - [grep-home-shorten.ts](.pi/extensions/grep-home-shorten.ts) truncates your `$HOME` variable into `~` to save tokens.
 - [guardrails.ts](.pi/extensions/guardrails.ts) blocks risky path and command patterns (for example `sudo` or `rm -rf`) with layered `repo-default`/`project`/`global` config scopes.
 - [sandbox.ts](.pi/extensions/sandbox.ts) sandboxes bash commands with `@anthropic-ai/sandbox-runtime`; see [packages/coding-agent/docs/sandboxing.md](packages/coding-agent/docs/sandboxing.md) for the canonical sandbox map and `/sandbox:info`.
