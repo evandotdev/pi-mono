@@ -223,6 +223,75 @@ describe("AgentSession prompt characterization", () => {
 		expect(expandedPrompt).toBe("Review this code: src/index.ts");
 	});
 
+	it("does not expand bare /<template> commands", async () => {
+		const template: PromptTemplate = {
+			name: "review",
+			description: "Review template",
+			content: "Review this code: $1",
+			filePath: "/virtual/review.md",
+			sourceInfo: createSyntheticSourceInfo("/virtual/review.md", {
+				source: "local",
+				scope: "temporary",
+				origin: "top-level",
+			}),
+		};
+		const resourceLoader = {
+			...createTestResourceLoader(),
+			getPrompts: () => ({ prompts: [template], diagnostics: [] }),
+		};
+		const harness = await createHarness({ resourceLoader });
+		harnesses.push(harness);
+		let sentPrompt = "";
+
+		harness.setResponses([
+			(context) => {
+				const user = context.messages.find((message) => message.role === "user");
+				sentPrompt = user ? getMessageText(user) : "";
+				return fauxAssistantMessage("ok");
+			},
+		]);
+
+		await harness.session.prompt("/review src/index.ts");
+
+		expect(sentPrompt).toBe("/review src/index.ts");
+	});
+
+	it("reports prompt commands with /prompt:<name> via extension API", async () => {
+		const template: PromptTemplate = {
+			name: "review",
+			description: "Review template",
+			content: "Review this code: $1",
+			filePath: "/virtual/review.md",
+			sourceInfo: createSyntheticSourceInfo("/virtual/review.md", {
+				source: "local",
+				scope: "temporary",
+				origin: "top-level",
+			}),
+		};
+		let promptCommands: string[] = [];
+		const harness = await createHarness({
+			extensionFactories: [
+				(pi) => {
+					pi.registerCommand("capture-commands", {
+						handler: async () => {
+							promptCommands = pi
+								.getCommands()
+								.filter((command) => command.source === "prompt")
+								.map((command) => command.name);
+						},
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		(
+			harness.session.resourceLoader as { getPrompts: () => { prompts: PromptTemplate[]; diagnostics: unknown[] } }
+		).getPrompts = () => ({ prompts: [template], diagnostics: [] });
+
+		await harness.session.prompt("/capture-commands");
+		expect(promptCommands).toEqual(["prompt:review"]);
+	});
+
 	it("dispatches extension commands without consuming a provider response", async () => {
 		const commandRuns: string[] = [];
 		const harness = await createHarness({

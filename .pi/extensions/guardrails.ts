@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolCallEvent } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
@@ -553,82 +553,86 @@ export default function (pi: ExtensionAPI) {
 		setStatus(status);
 	}
 
-	function parseScopeArg(args: string): GuardrailsConfigScope | "status" | undefined {
-		const normalized = args.trim().toLowerCase();
-		if (normalized === "") return "status";
-		if (normalized === "status") return "status";
-		if (normalized === "project" || normalized === "global" || normalized === "repo-default") return normalized;
-		return undefined;
-	}
-
 	function getScopePath(resolved: ReturnType<typeof resolveConfig>, scope: GuardrailsConfigScope): string {
 		if (scope === "project") return resolved.paths.projectPath;
 		if (scope === "global") return resolved.paths.globalPath;
 		return resolved.paths.repoDefaultPath;
 	}
 
+	const runGuardrailsCommand = async (scope: GuardrailsConfigScope | "status", ctx: ExtensionContext): Promise<void> => {
+		const resolved = resolveConfig(ctx.cwd);
+		if (scope === "status") {
+			const loaded =
+				resolved.appliedSources.length > 0
+					? resolved.appliedSources.map((source) => `${source.scope} (${source.path})`).join(" + ")
+					: "none";
+			ctx.ui.notify(`Guardrails config sources: ${loaded}`, "info");
+			return;
+		}
+
+		const targetPath = getScopePath(resolved, scope);
+		const initialRaw = existsSync(targetPath)
+			? readFileSync(targetPath, "utf8")
+			: `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`;
+		const edited = await ctx.ui.editor(`Edit guardrails (${scope})`, initialRaw);
+		if (edited === undefined) {
+			ctx.ui.notify("Guardrails config edit cancelled", "info");
+			return;
+		}
+
+		try {
+			const parsed = JSON.parse(edited) as unknown;
+			parseGuardrailsConfig(parsed);
+			mkdirSync(path.dirname(targetPath), { recursive: true });
+			writeFileSync(targetPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+			ctx.ui.notify(`Saved guardrails config: ${targetPath}`, "success");
+
+			const reloaded = resolveConfig(ctx.cwd);
+			applyResolvedConfig(
+				reloaded,
+				(message, type) => ctx.ui.notify(message, type),
+				(text) => ctx.ui.setStatus(text),
+				{ verbose: true },
+			);
+		} catch (error) {
+			ctx.ui.notify(`Guardrails config not saved: ${error instanceof Error ? error.message : String(error)}`, "error");
+		}
+	};
+
 	pi.registerCommand("settings:guardrails", {
-		description: "Show or edit guardrails config (status | project | global | repo-default)",
-		getArgumentCompletions: (prefix) => {
-			const options = ["status", "project", "global", "repo-default"];
-			const filtered = options
-				.filter((option) => option.startsWith(prefix.trim().toLowerCase()))
-				.map((option) => ({
-					value: option,
-					label: option,
-					description:
-						option === "status"
-							? "Show active config sources"
-							: `Edit ${option} guardrails config file`,
-				}));
-			return filtered.length > 0 ? filtered : null;
-		},
+		description: "Show active guardrails config sources",
 		handler: async (args, ctx) => {
-			const parsedScope = parseScopeArg(args);
-			if (!parsedScope) {
-				ctx.ui.notify("Usage: /settings:guardrails [status|project|global|repo-default]", "warning");
+			if (args.trim()) {
+				ctx.ui.notify("Usage: /settings:guardrails", "warning");
 				return;
 			}
-
-			const resolved = resolveConfig(ctx.cwd);
-			if (parsedScope === "status") {
-				const loaded =
-					resolved.appliedSources.length > 0
-						? resolved.appliedSources.map((source) => `${source.scope} (${source.path})`).join(" + ")
-						: "none";
-				ctx.ui.notify(`Guardrails config sources: ${loaded}`, "info");
-				return;
-			}
-
-			const targetPath = getScopePath(resolved, parsedScope);
-			const initialRaw = existsSync(targetPath)
-				? readFileSync(targetPath, "utf8")
-				: `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`;
-			const edited = await ctx.ui.editor(`Edit guardrails (${parsedScope})`, initialRaw);
-			if (edited === undefined) {
-				ctx.ui.notify("Guardrails config edit cancelled", "info");
-				return;
-			}
-
-			try {
-				const parsed = JSON.parse(edited) as unknown;
-				parseGuardrailsConfig(parsed);
-				mkdirSync(path.dirname(targetPath), { recursive: true });
-				writeFileSync(targetPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-				ctx.ui.notify(`Saved guardrails config: ${targetPath}`, "success");
-
-				const reloaded = resolveConfig(ctx.cwd);
-				applyResolvedConfig(
-					reloaded,
-					(message, type) => ctx.ui.notify(message, type),
-					(text) => ctx.ui.setStatus(text),
-					{ verbose: true },
-				);
-			} catch (error) {
-				ctx.ui.notify(`Guardrails config not saved: ${error instanceof Error ? error.message : String(error)}`, "error");
-			}
+			await runGuardrailsCommand("status", ctx);
 		},
 	});
+
+	pi.registerCommand("settings:guardrails:status", {
+		description: "Show active guardrails config sources",
+		handler: async (args, ctx) => {
+			if (args.trim()) {
+				ctx.ui.notify("Usage: /settings:guardrails:status", "warning");
+				return;
+			}
+			await runGuardrailsCommand("status", ctx);
+		},
+	});
+
+	for (const scope of ["project", "global", "repo-default"] as const) {
+		pi.registerCommand(`settings:guardrails:${scope}`, {
+			description: `Edit ${scope} guardrails config file`,
+			handler: async (args, ctx) => {
+				if (args.trim()) {
+					ctx.ui.notify(`Usage: /settings:guardrails:${scope}`, "warning");
+					return;
+				}
+				await runGuardrailsCommand(scope, ctx);
+			},
+		});
+	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		try {

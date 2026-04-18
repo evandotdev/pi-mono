@@ -170,7 +170,7 @@ describe("InteractiveMode.setupAutocomplete", () => {
 			signal: new AbortController().signal,
 		});
 		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:list")).toBe(true);
-		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:show")).toBe(true);
+		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:show")).toBe(false);
 		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:default")).toBe(true);
 		expect(namespaceSuggestions?.items.some((item: { value: string }) => item.value === "model:plan")).toBe(true);
 		expect(
@@ -187,6 +187,145 @@ describe("InteractiveMode.setupAutocomplete", () => {
 			scopedArgSuggestions?.items.some((item: { value: string }) => item.value === "anthropic/claude-sonnet-4-5"),
 		).toBe(true);
 		expect(scopedArgSuggestions?.items.some((item: { value: string }) => item.value === "show")).toBe(false);
+
+		const thinkingSuggestions = await provider.getSuggestions(["/thinking"], 0, "/thinking".length, {
+			signal: new AbortController().signal,
+		});
+		expect(thinkingSuggestions?.items.some((item: { value: string }) => item.value === "thinking:high")).toBe(true);
+
+		const contextSuggestions = await provider.getSuggestions(["/context"], 0, "/context".length, {
+			signal: new AbortController().signal,
+		});
+		expect(contextSuggestions?.items.some((item: { value: string }) => item.value === "context:clear")).toBe(true);
+
+		const rootSuggestions = await provider.getSuggestions(["/"], 0, "/".length, {
+			signal: new AbortController().signal,
+		});
+		expect(rootSuggestions?.items.some((item: { value: string }) => item.value === "new")).toBe(false);
+		expect(rootSuggestions?.items.some((item: { value: string }) => item.value === "resume")).toBe(false);
+		expect(rootSuggestions?.items.some((item: { value: string }) => item.value === "name")).toBe(false);
+		expect(rootSuggestions?.items.some((item: { value: string }) => item.value === "session:rename")).toBe(false);
+	});
+
+	test("registers prompt templates as /prompt:<name> only", async () => {
+		const fakeEditor = {
+			setAutocompleteProvider: vi.fn(),
+		};
+
+		const fakeThis: any = {
+			session: {
+				scopedModels: [],
+				modelRegistry: {
+					getAvailable: () => [],
+				},
+				promptTemplates: [
+					{
+						name: "review",
+						description: "Review template",
+						content: "Review: $1",
+						filePath: "/tmp/review.md",
+						sourceInfo: {
+							path: "/tmp/review.md",
+							source: "local",
+							scope: "project",
+							origin: "top-level",
+						},
+					},
+				],
+				extensionRunner: undefined,
+				resourceLoader: {
+					getSkills: () => ({ skills: [] }),
+				},
+			},
+			sessionManager: {
+				getCwd: () => process.cwd(),
+			},
+			settingsManager: {
+				getModelSelections: () => ({}),
+				getEnableSkillCommands: () => false,
+			},
+			normalizeModelScope: (scope: string) => {
+				const normalized = scope.trim().toLowerCase();
+				return normalized === "normal" ? "default" : normalized;
+			},
+			prefixAutocompleteDescription: (description?: string) => description,
+			defaultEditor: fakeEditor,
+			editor: fakeEditor,
+			skillCommands: new Map(),
+		};
+
+		(InteractiveMode as any).prototype.setupAutocomplete.call(fakeThis, undefined);
+		const provider = fakeThis.autocompleteProvider;
+		const rootSuggestions = await provider.getSuggestions(["/"], 0, "/".length, {
+			signal: new AbortController().signal,
+		});
+		expect(rootSuggestions?.items.some((item: { value: string }) => item.value === "prompt:review")).toBe(true);
+		expect(rootSuggestions?.items.some((item: { value: string }) => item.value === "review")).toBe(false);
+	});
+});
+
+describe("InteractiveMode.commandSyntax", () => {
+	test("accepts /thinking:<level> and rejects space-delimited thinking levels", () => {
+		const session = {
+			thinkingLevel: "medium",
+			getAvailableThinkingLevels: () => ["off", "minimal", "low", "medium", "high", "xhigh"],
+			setThinkingLevel(level: string) {
+				this.thinkingLevel = level;
+			},
+			supportsThinking: () => true,
+		};
+		const fakeThis: any = {
+			session,
+			footer: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+		};
+
+		(InteractiveMode as any).prototype.handleThinkingCommand.call(fakeThis, "/thinking high");
+		expect(fakeThis.showWarning).toHaveBeenCalledWith(
+			"Usage: /thinking | /thinking:<off|minimal|low|medium|high|xhigh>",
+		);
+
+		(InteractiveMode as any).prototype.handleThinkingCommand.call(fakeThis, "/thinking:high");
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Thinking level: high");
+	});
+
+	test("accepts /context:clear and rejects space-delimited context subcommands", async () => {
+		const fakeThis: any = {
+			showContextBreakdown: vi.fn(),
+			handleClearContextCommand: vi.fn(async () => {}),
+			showWarning: vi.fn(),
+		};
+
+		await (InteractiveMode as any).prototype.handleContextCommand.call(fakeThis, "/context clear");
+		expect(fakeThis.showWarning).toHaveBeenCalledWith("Usage: /context | /context:clear");
+		expect(fakeThis.handleClearContextCommand).not.toHaveBeenCalled();
+
+		await (InteractiveMode as any).prototype.handleContextCommand.call(fakeThis, "/context:clear");
+		expect(fakeThis.handleClearContextCommand).toHaveBeenCalledTimes(1);
+	});
+
+	test("recognizes only canonical /session:name command", () => {
+		const isSessionNameCommand = (InteractiveMode as any).prototype.isSessionNameCommand;
+		expect(isSessionNameCommand.call({}, "/session:name")).toBe(true);
+		expect(isSessionNameCommand.call({}, "/session:name test")).toBe(true);
+		expect(isSessionNameCommand.call({}, "/name test")).toBe(false);
+		expect(isSessionNameCommand.call({}, "/session:rename test")).toBe(false);
+	});
+
+	test("uses explicit scope labels in autocomplete provenance tags", () => {
+		const fakeThis: any = {
+			getAutocompleteSourceTag: (InteractiveMode as any).prototype.getAutocompleteSourceTag,
+		};
+
+		const result = (InteractiveMode as any).prototype.prefixAutocompleteDescription.call(fakeThis, "Template", {
+			path: "/tmp/review.md",
+			source: "local",
+			scope: "user",
+			origin: "top-level",
+		});
+		expect(result).toBe("[user] Template");
 	});
 });
 

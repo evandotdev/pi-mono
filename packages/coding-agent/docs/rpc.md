@@ -65,7 +65,7 @@ If the agent is streaming and no `streamingBehavior` is specified, the command r
 
 **Extension commands**: If the message is an extension command (e.g., `/mycommand`), it executes immediately even during streaming. Extension commands manage their own LLM interaction via `pi.sendMessage()`.
 
-**Input expansion**: Skill commands (`/skill:name`) and prompt templates (`/template`) are expanded before sending/queueing.
+**Input expansion**: Skill commands (`/skill:name`) and prompt templates (`/prompt:<template>`) are expanded before sending/queueing.
 
 Response:
 ```json
@@ -685,7 +685,7 @@ Response:
   "data": {
     "commands": [
       {"name": "session-name", "description": "Set or clear session name", "source": "extension", "path": "/home/user/.pi/agent/extensions/session.ts"},
-      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.pi/agent/prompts/fix-tests.md"},
+      {"name": "prompt:fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.pi/agent/prompts/fix-tests.md"},
       {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "location": "user", "path": "/home/user/.pi/agent/skills/brave-search/SKILL.md"}
     ]
   }
@@ -693,7 +693,7 @@ Response:
 ```
 
 Each command has:
-- `name`: Command name (invoke with `/name`)
+- `name`: Command name (invoke with `/<name>`, for example `/prompt:fix-tests`)
 - `description`: Human-readable description (optional for extension commands)
 - `source`: What kind of command:
   - `"extension"`: Registered via `pi.registerCommand()` in an extension

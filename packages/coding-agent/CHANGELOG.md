@@ -7,28 +7,27 @@
 - Interactive OAuth usage dashboard for Anthropic, OpenAI Codex, and Antigravity (footer + account selectors, including utilization windows and reset timing).
 - Multi-account OAuth flow and load balancing, including account selection during model switches and retry-time credential rotation on rate-limit/overload failures.
 - New interactive slash command capabilities: `/thinking`, `/context`, `/model list`, and `/generate-models`.
-- Namespaced command groups for sessions and prompts, with canonical forms (`/session:*`, `/prompt:*`) and backward-compatible short aliases.
+- Namespaced command groups for sessions and prompts, with canonical forms (`/session:*`, `/prompt:*`).
 - Docker sandbox workflow for fork development, including monorepo `mise` tasks, a bundled `/sandbox` status command with host-to-container mount mappings, local sandbox image tooling, and `-d <directory>` overrides for extra sandbox mounts under `/home/pisandbox`.
 - Stow-based machine setup automation for repo `.pi` resources and global `mise` task wrappers.
-- Current fork resources include `plan-mode/`, the `commit` and `security` skills, and bundled extensions `grep-home-shorten.ts`, `guardrails.ts`, `prompt-url-widget.ts`, `redraws.ts`, `sandbox.ts`, and `tps.ts`.
+- Current fork resources include the `commit` and `security` skills, and bundled extensions `grep-home-shorten.ts`, `guardrails.ts`, `prompt-url-widget.ts`, `redraws.ts`, `sandbox.ts`, and `tps.ts`.
 - Legacy bundled `diff.ts` and `files.ts` extensions were removed from `.pi/extensions`.
 
 ### Added
 
-- Added sandbox inspection diagnostics with `/sandbox:info` and `/doctor:sandbox`, plus canonical sandboxing docs for Docker and extension setup.
-- Added `plan-mode/` branch-based planning extension with `/plan` workflow and approval/implementation handoff.
+- Added sandbox inspection diagnostics with `/sandbox:info`, plus canonical sandboxing docs for Docker and extension setup.
 - Added `commit` and `security` skills under `.pi/skills/` for commit formatting and security review/hardening workflows.
 - Added `grep-home-shorten.ts` and `tps.ts` bundled extensions for shorter grep output and tokens-per-second visibility.
 - Added OAuth usage visibility in interactive mode: footer and OAuth account selectors now show provider utilization windows and reset timing for Anthropic, OpenAI Codex, and Antigravity accounts.
 - Added multi-account OAuth selection flows in interactive mode, including account selection when switching models and richer account labels in login/model pickers.
-- Added slash commands `/thinking <off|minimal|low|medium|high|xhigh>` and `/context [show|clear]` for direct reasoning-level control and context inspection/clearing.
+- Added slash commands `/thinking` + `/thinking:<off|minimal|low|medium|high|xhigh>` and `/context` + `/context:clear` for direct reasoning-level control and context inspection/clearing.
 - Added `/model list` support to print available models in chat.
 - Added named model selection commands via `/model:<scope>` (for example `/model:default`, `/model:plan`, `/model:extension:answer`) with persisted `settings.json` `modelSelections` entries.
 - Added `/generate-models` slash command to run pi-ai model generation from interactive mode.
 - Added `/usage` slash command to show OAuth provider usage across all accounts with utilization windows and reset timing.
 - Added `/share:system-prompt` to export the current effective system prompt as a secret GitHub gist with stable SHA-256 metadata for prompt fingerprinting.
-- Added grouped session command names `/session:new`, `/session:resume`, `/session:name`, and `/session:rename` while keeping `/new`, `/resume`, and `/name` as aliases.
-- Added `/prompt:<template>` aliases for prompt templates in expansion, slash-command autocomplete, and `/hotkeys` output.
+- Added grouped session command names `/session:new`, `/session:resume`, and `/session:name`.
+- Added canonical `/prompt:<template>` prompt template commands in expansion, slash-command autocomplete, and `/hotkeys` output.
 - Added monorepo `mise` tasks and stow helpers for sandbox launch workflows (`pi`, `pi:readonly`, `pi:shell`, `pi:yolo`, `pi:build`, and `pi:stow:*`).
 - Added Docker sandbox launcher/config artifacts for fork-local runs, including `.pi/docker-sandbox.json`, `.pi/extensions/sandbox.ts`, and `scripts/pi-sandbox*`.
 
@@ -39,10 +38,9 @@
 - `UsageService` now passes full `OAuthCredentials` to `fetchUsage` instead of just the access token string, enabling providers to use stored fields like `accountId`.
 - Changed retry handling to rotate among available credentials for a provider on rate-limit/overload failures and refresh usage status after account changes.
 - Changed footer OAuth usage rendering to show duration-style usage windows (for example `5h` and `7d`) with clearer utilization colorization in the compact footer. `/usage` remains exhaustive.
-- Changed bundled `plan-mode` extension to apply the configured `plan` model selection when entering or restoring plan mode.
-- Changed prompt-template command handling to treat `/prompt:<template>` as the namespaced form while preserving `/<template>` compatibility.
-- Changed model command namespace to colon-style subcommands (`/model:list`, `/model:show`, `/model:<scope>`), and removed space-style `/model list` and `/model show`.
-- Changed session command docs and dispatch to prefer namespaced `/session:*` forms while preserving short aliases.
+- Changed prompt-template command handling to use canonical `/prompt:<template>` commands.
+- Changed model command namespace to colon-style subcommands (`/model:list`, `/model:<scope>`), removed `/model:show`, and removed space-style `/model list` and `/model show`.
+- Changed session command docs and dispatch to use canonical namespaced `/session:*` forms only.
 
 ### Fixed
 
@@ -62,6 +60,11 @@
 
 ### Removed
 
+- Removed legacy session command aliases `/new`, `/resume`, `/name`, and `/session:rename`.
+- Removed legacy prompt template expansion via bare `/<template>` commands; use `/prompt:<template>`.
+- Removed `/context:show` and space-delimited context/thinking command forms (`/context clear`, `/thinking high`).
+- Removed `/doctor:sandbox` alias in the bundled sandbox extension; use `/sandbox:info`.
+- Removed bundled `plan-mode/` extension from `.pi/extensions`; use `.pi/prompts/plan.md` via `/prompt:plan` for planning.
 - Removed bundled `diff.ts` and `files.ts` extensions from `.pi/extensions`.
 
 ## [0.67.2] - 2026-04-14

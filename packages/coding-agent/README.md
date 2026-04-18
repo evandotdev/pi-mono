@@ -158,21 +158,23 @@ Standard editing keybindings for delete word, undo, etc. See [docs/keybindings.m
 
 ### Commands
 
-Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are available as `/skill:name`, and [prompt templates](#prompt-templates) expand via either `/templatename` or `/prompt:templatename`.
+Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are available as `/skill:name`, and [prompt templates](#prompt-templates) expand via `/prompt:<templatename>`.
 
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | OAuth authentication |
-| `/model` | Switch active model (`/model:list`, `/model:show`) |
+| `/model` | Switch active model (`/model:list`) |
 | `/model:<scope>` | Configure named model selections (e.g., `/model:plan`, `/model:extension:answer`; `/model:default` also switches the active model) |
-| `/thinking [off\|minimal\|low\|medium\|high\|xhigh]` | Show or set the thinking level |
+| `/thinking` | Show current thinking level and available options |
+| `/thinking:<off\|minimal\|low\|medium\|high\|xhigh>` | Set thinking level |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
-| `/session:resume`, `/resume` | Pick from previous sessions |
-| `/session:new`, `/new` | Start a new session |
-| `/session:name <name>`, `/session:rename <name>`, `/name <name>` | Set session display name |
+| `/session:resume` | Pick from previous sessions |
+| `/session:new` | Start a new session |
+| `/session:name <name>` | Set session display name |
 | `/session` | Show session info (path, tokens, cost) |
-| `/context [show\|clear]` | Show context source breakdown or clear current branch context |
+| `/context` | Show context source breakdown |
+| `/context:clear` | Clear current branch context |
 | `/tree` | Jump to any point in the session and continue from there |
 | `/fork` | Create a new session from the current branch |
 | `/compact [prompt]` | Manually compact context, optional custom instructions |
@@ -187,7 +189,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/changelog` | Display version history |
 | `/quit` | Quit pi |
 
-Prompt templates support both forms: `/<template>` and `/prompt:<template>`.
+Prompt templates use the canonical form: `/prompt:<template>`.
 
 ### Keyboard Shortcuts
 
@@ -300,7 +302,7 @@ Raw JSONL session files do not normally include the effective `systemPrompt`. Us
 
 ### Prompt Templates
 
-Reusable prompts as Markdown files. Type `/name` to expand.
+Reusable prompts as Markdown files. Type `/prompt:name` to expand.
 
 ```markdown
 <!-- ~/.pi/agent/prompts/review.md -->

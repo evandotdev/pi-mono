@@ -331,7 +331,7 @@ export function formatSandboxReport(report: SandboxReport): string {
 	lines.push(`  Project .pi root: ${report.projectRoot ?? "(none found)"}`);
 	lines.push(formatPathState("  Home .pi", report.homePi));
 	lines.push(`  Global agent dir: ${report.agentDir}`);
-	lines.push("  Command: /sandbox:info (alias /doctor:sandbox)");
+	lines.push("  Command: /sandbox:info");
 	lines.push("");
 	lines.push("OS sandbox config:");
 	lines.push("  Precedence: default → global → project");

@@ -194,15 +194,6 @@ export class InteractiveMode {
 		"high",
 		"xhigh",
 	];
-	private static readonly THINKING_LEVEL_DESCRIPTIONS: Readonly<Record<ThinkingLevel, string>> = {
-		off: "Disable reasoning/thinking",
-		minimal: "Minimal reasoning for fastest responses",
-		low: "Light reasoning",
-		medium: "Balanced reasoning",
-		high: "Stronger reasoning",
-		xhigh: "Maximum reasoning (model-dependent)",
-	};
-
 	private lastSigintTime = 0;
 	private lastEscapeTime = 0;
 	private changelogMarkdown: string | undefined = undefined;
@@ -344,7 +335,7 @@ export class InteractiveMode {
 			return undefined;
 		}
 
-		const scopePrefix = sourceInfo.scope === "user" ? "u" : sourceInfo.scope === "project" ? "p" : "t";
+		const scopePrefix = sourceInfo.scope === "user" ? "user" : sourceInfo.scope === "project" ? "project" : "temp";
 		const source = sourceInfo.source.trim();
 
 		if (source === "auto" || source === "local" || source === "cli") {
@@ -427,74 +418,22 @@ export class InteractiveMode {
 		};
 
 		const modelNamespaceScopes = ["default", "plan", "extension:answer"];
-		const modelNamespaceCommands: SlashCommand[] = [
-			{
-				name: "model:list",
-				description: "List available models in chat",
-			},
-			{
-				name: "model:show",
-				description: "Show configured model selections",
-			},
-			...modelNamespaceScopes.map((scope) => ({
-				name: `model:${scope}`,
-				description: `Configure model selection for ${scope} scope`,
-				getArgumentCompletions: getModelArgumentCompletions,
-			})),
-		];
+		const modelNamespaceCommands: SlashCommand[] = modelNamespaceScopes.map((scope) => ({
+			name: `model:${scope}`,
+			description: `Configure model selection for ${scope} scope`,
+			getArgumentCompletions: getModelArgumentCompletions,
+		}));
 		slashCommands.push(...modelNamespaceCommands);
 
-		const contextCommand = slashCommands.find((command) => command.name === "context");
-		if (contextCommand) {
-			const contextArgs = [
-				{ value: "show", description: "Show context source breakdown" },
-				{ value: "clear", description: "Clear current branch context" },
-			];
-			contextCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				const filtered = fuzzyFilter(contextArgs, prefix, (item) => item.value);
-				if (filtered.length === 0) return null;
-				return filtered.map((item) => ({
-					value: item.value,
-					label: item.value,
-					description: item.description,
-				}));
-			};
-		}
-
-		const thinkingCommand = slashCommands.find((command) => command.name === "thinking");
-		if (thinkingCommand) {
-			thinkingCommand.getArgumentCompletions = (prefix: string): AutocompleteItem[] | null => {
-				const availableLevels = this.session.getAvailableThinkingLevels().map((level) => ({
-					value: level,
-					description: InteractiveMode.THINKING_LEVEL_DESCRIPTIONS[level],
-				}));
-				const filtered = fuzzyFilter(availableLevels, prefix, (item) => item.value);
-				if (filtered.length === 0) return null;
-				return filtered.map((item) => ({
-					value: item.value,
-					label: item.value,
-					description: item.description,
-				}));
-			};
-		}
-
 		// Convert prompt templates to SlashCommand format for autocomplete.
-		// Register both /name and /prompt:name.
-		const templateCommands: SlashCommand[] = this.session.promptTemplates.flatMap((cmd) => {
+		// Register canonical /prompt:<template> commands only.
+		const templateCommands: SlashCommand[] = this.session.promptTemplates.map((cmd) => {
 			const description = this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo);
-			const commands: SlashCommand[] = [
-				{
-					name: cmd.name,
-					description,
-				},
-			];
-			if (!cmd.name.startsWith("prompt:")) {
-				commands.push({
-					name: `prompt:${cmd.name}`,
-					description: description ? `${description} (alias)` : "Prompt template alias",
-				});
-			}
-			return commands;
+			const name = cmd.name.startsWith("prompt:") ? cmd.name : `prompt:${cmd.name}`;
+			return {
+				name,
+				description,
+			};
 		});
 
 		// Convert extension commands to SlashCommand format
@@ -1209,11 +1148,15 @@ export class InteractiveMode {
 				const templateList = this.formatScopeGroups(groups, {
 					formatPath: (item) => {
 						const template = templateByPath.get(item.path);
-						return template ? `/${template.name}` : this.formatDisplayPath(item.path);
+						if (!template) return this.formatDisplayPath(item.path);
+						const commandName = template.name.startsWith("prompt:") ? template.name : `prompt:${template.name}`;
+						return `/${commandName}`;
 					},
 					formatPackagePath: (item) => {
 						const template = templateByPath.get(item.path);
-						return template ? `/${template.name}` : this.formatDisplayPath(item.path);
+						if (!template) return this.formatDisplayPath(item.path);
+						const commandName = template.name.startsWith("prompt:") ? template.name : `prompt:${template.name}`;
+						return `/${commandName}`;
 					},
 				});
 				this.chatContainer.addChild(new Text(`${sectionHeader("Prompts")}\n${templateList}`, 0, 0));
@@ -2254,7 +2197,7 @@ export class InteractiveMode {
 				await this.handleModelCommand(text);
 				return;
 			}
-			if (text === "/thinking" || text.startsWith("/thinking ")) {
+			if (text === "/thinking" || text.startsWith("/thinking:")) {
 				this.handleThinkingCommand(text);
 				this.editor.setText("");
 				return;
@@ -2324,7 +2267,7 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/session:new" || text === "/new") {
+			if (text === "/session:new") {
 				this.editor.setText("");
 				await this.handleClearCommand();
 				return;
@@ -2335,7 +2278,7 @@ export class InteractiveMode {
 				await this.handleCompactCommand(customInstructions);
 				return;
 			}
-			if (text === "/context" || text.startsWith("/context ")) {
+			if (text === "/context" || text.startsWith("/context:")) {
 				this.editor.setText("");
 				await this.handleContextCommand(text);
 				return;
@@ -2370,7 +2313,7 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/session:resume" || text === "/resume") {
+			if (text === "/session:resume") {
 				this.showSessionSelector();
 				this.editor.setText("");
 				return;
@@ -3670,16 +3613,20 @@ export class InteractiveMode {
 	}
 
 	private handleThinkingCommand(text: string): void {
-		const args = text.replace(/^\/thinking/, "").trim();
 		const availableLevels = this.session.getAvailableThinkingLevels();
-		if (!args) {
+		if (text === "/thinking") {
 			this.showStatus(`Thinking level: ${this.session.thinkingLevel} (available: ${availableLevels.join(", ")})`);
 			return;
 		}
 
-		const [rawLevel, ...extraArgs] = args.split(/\s+/).filter(Boolean);
-		if (!rawLevel || extraArgs.length > 0) {
-			this.showWarning("Usage: /thinking <off|minimal|low|medium|high|xhigh>");
+		if (!text.startsWith("/thinking:")) {
+			this.showWarning("Usage: /thinking | /thinking:<off|minimal|low|medium|high|xhigh>");
+			return;
+		}
+
+		const rawLevel = text.slice("/thinking:".length).trim();
+		if (!rawLevel || rawLevel.includes(" ")) {
+			this.showWarning("Usage: /thinking | /thinking:<off|minimal|low|medium|high|xhigh>");
 			return;
 		}
 
@@ -3719,7 +3666,6 @@ export class InteractiveMode {
 	):
 		| { type: "active"; searchTerm: string | undefined }
 		| { type: "list" }
-		| { type: "show" }
 		| { type: "scope"; scope: string; searchTerm: string | undefined }
 		| undefined {
 		if (commandText === "/model") {
@@ -3728,8 +3674,12 @@ export class InteractiveMode {
 
 		if (commandText.startsWith("/model ")) {
 			const searchTerm = commandText.slice(7).trim() || undefined;
-			if (searchTerm?.toLowerCase() === "list" || searchTerm?.toLowerCase() === "show") {
-				this.showWarning(`Use /model:${searchTerm.toLowerCase()} (colon syntax)`);
+			if (searchTerm?.toLowerCase() === "list") {
+				this.showWarning("Use /model:list");
+				return undefined;
+			}
+			if (searchTerm?.toLowerCase() === "show") {
+				this.showWarning("Usage: /model:list | /model:<scope> [provider/model]");
 				return undefined;
 			}
 			return { type: "active", searchTerm };
@@ -3741,27 +3691,24 @@ export class InteractiveMode {
 
 		const rest = commandText.slice(7).trim();
 		if (!rest) {
-			this.showWarning("Usage: /model:list | /model:show | /model:<scope> [provider/model]");
+			this.showWarning("Usage: /model:list | /model:<scope> [provider/model]");
 			return undefined;
 		}
 
 		if (rest === "list") {
 			return { type: "list" };
 		}
-		if (rest === "show") {
-			return { type: "show" };
-		}
 
 		const firstSpace = rest.indexOf(" ");
 		const rawScope = (firstSpace === -1 ? rest : rest.slice(0, firstSpace)).trim();
 		if (!rawScope) {
-			this.showWarning("Usage: /model:list | /model:show | /model:<scope> [provider/model]");
+			this.showWarning("Usage: /model:list | /model:<scope> [provider/model]");
 			return undefined;
 		}
 
 		const scope = this.normalizeModelScope(rawScope);
 		if (scope === "list" || scope === "show") {
-			this.showWarning(`Use /model:${scope} (no additional scope)`);
+			this.showWarning("Usage: /model:list | /model:<scope> [provider/model]");
 			return undefined;
 		}
 		const searchTerm = firstSpace === -1 ? undefined : rest.slice(firstSpace + 1).trim() || undefined;
@@ -3774,25 +3721,6 @@ export class InteractiveMode {
 			return undefined;
 		}
 		return this.session.modelRegistry.find(selection.provider, selection.modelId);
-	}
-
-	private showModelSelections(): void {
-		const configuredSelections = this.settingsManager.getModelSelections();
-		const scopes = Object.keys(configuredSelections).sort();
-		if (scopes.length === 0) {
-			this.showStatus("No configured model selections");
-			return;
-		}
-
-		const lines = scopes.map((scope) => {
-			const selection = configuredSelections[scope];
-			return `${scope}: ${selection.provider}/${selection.modelId}`;
-		});
-		const output = [theme.bold("Configured Model Selections"), "", ...lines].join("\n");
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(output, 1, 0));
-		this.ui.requestRender();
 	}
 
 	private async setModelSelectionForScope(scope: string, model: Model<any>): Promise<void> {
@@ -3809,10 +3737,6 @@ export class InteractiveMode {
 
 		if (parsed.type === "list") {
 			await this.showModelList("default");
-			return;
-		}
-		if (parsed.type === "show") {
-			this.showModelSelections();
 			return;
 		}
 
@@ -4923,25 +4847,18 @@ export class InteractiveMode {
 	}
 
 	private isSessionNameCommand(text: string): boolean {
-		return (
-			text === "/session:name" ||
-			text.startsWith("/session:name ") ||
-			text === "/session:rename" ||
-			text.startsWith("/session:rename ") ||
-			text === "/name" ||
-			text.startsWith("/name ")
-		);
+		return text === "/session:name" || text.startsWith("/session:name ");
 	}
 
 	private handleNameCommand(text: string): void {
-		const name = text.replace(/^\/(?:name|session:(?:name|rename))\s*/, "").trim();
+		const name = text.replace(/^\/session:name\s*/, "").trim();
 		if (!name) {
 			const currentName = this.sessionManager.getSessionName();
 			if (currentName) {
 				this.chatContainer.addChild(new Spacer(1));
 				this.chatContainer.addChild(new Text(theme.fg("dim", `Session name: ${currentName}`), 1, 0));
 			} else {
-				this.showWarning("Usage: /session:name <name> (aliases: /session:rename <name>, /name <name>)");
+				this.showWarning("Usage: /session:name <name>");
 			}
 			this.ui.requestRender();
 			return;
@@ -5015,17 +4932,20 @@ export class InteractiveMode {
 	}
 
 	private async handleContextCommand(text: string): Promise<void> {
-		const args = text.replace(/^\/context/, "").trim();
-		if (!args || args === "show") {
+		if (text === "/context") {
 			this.showContextBreakdown();
 			return;
 		}
-		if (args === "clear") {
+		if (text === "/context:clear") {
 			await this.handleClearContextCommand();
 			return;
 		}
+		if (text === "/context:show") {
+			this.showWarning("Use /context");
+			return;
+		}
 
-		this.showWarning("Usage: /context [show|clear]");
+		this.showWarning("Usage: /context | /context:clear");
 	}
 
 	private showContextBreakdown(): void {
@@ -5273,10 +5193,8 @@ export class InteractiveMode {
 
 		for (const template of this.session.promptTemplates) {
 			const description = template.description ?? "";
-			hotkeys += `| \`/${template.name}\` | prompt | ${escapeMarkdownCell(description)} |\n`;
-			if (!template.name.startsWith("prompt:")) {
-				hotkeys += `| \`/prompt:${template.name}\` | prompt | ${escapeMarkdownCell(description ? `${description} (alias)` : "alias")} |\n`;
-			}
+			const commandName = template.name.startsWith("prompt:") ? template.name : `prompt:${template.name}`;
+			hotkeys += `| \`/${commandName}\` | prompt | ${escapeMarkdownCell(description)} |\n`;
 		}
 
 		if (this.settingsManager.getEnableSkillCommands()) {

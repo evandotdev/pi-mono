@@ -14,7 +14,7 @@ Where `<path>` is the working directory with `/` replaced by `-`.
 
 Sessions can be removed by deleting their `.jsonl` files under `~/.pi/agent/sessions/`.
 
-Pi also supports deleting sessions interactively from `/resume` (select a session and press `Ctrl+D`, then confirm). When available, pi uses the `trash` CLI to avoid permanent deletion.
+Pi also supports deleting sessions interactively from `/session:resume` (select a session and press `Ctrl+D`, then confirm). When available, pi uses the `trash` CLI to avoid permanent deletion.
 
 ## Session Version
 
@@ -282,13 +282,13 @@ Set `label` to `undefined` to clear a label.
 
 ### SessionInfoEntry
 
-Session metadata (e.g., user-defined display name). Set via `/name` command or `pi.setSessionName()` in extensions.
+Session metadata (e.g., user-defined display name). Set via `/session:name` command or `pi.setSessionName()` in extensions.
 
 ```json
 {"type":"session_info","id":"k1l2m3n4","parentId":"j0k1l2m3","timestamp":"2024-12-03T14:35:00.000Z","name":"Refactor auth module"}
 ```
 
-The session name is displayed in the session selector (`/resume`) instead of the first message when set.
+The session name is displayed in the session selector (`/session:resume`) instead of the first message when set.
 
 ## Tree Structure
 

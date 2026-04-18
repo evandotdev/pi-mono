@@ -260,7 +260,7 @@ user sends prompt ────────────────────�
                                                            │
 user sends another prompt ◄────────────────────────────────┘
 
-/new (new session) or /resume (switch session)
+/session:new (new session) or /session:resume (switch session)
   ├─► session_before_switch (can cancel)
   ├─► session_shutdown
   ├─► session_start { reason: "new" | "resume", previousSessionFile? }
@@ -324,7 +324,7 @@ pi.on("session_start", async (event, ctx) => {
 
 #### session_before_switch
 
-Fired before starting a new session (`/new`) or switching sessions (`/resume`).
+Fired before starting a new session (`/session:new`) or switching sessions (`/session:resume`).
 
 ```typescript
 pi.on("session_before_switch", async (event, ctx) => {
@@ -691,13 +691,13 @@ pi.on("user_bash", (event, ctx) => {
 
 #### input
 
-Fired when user input is received, after extension commands are checked but before skill and template expansion. The event sees the raw input text, so `/skill:foo` and `/template` are not yet expanded.
+Fired when user input is received, after extension commands are checked but before skill and template expansion. The event sees the raw input text, so `/skill:foo` and `/prompt:<template>` are not yet expanded.
 
 **Processing order:**
 1. Extension commands (`/cmd`) checked first - if found, handler runs and input event is skipped
 2. `input` event fires - can intercept, transform, or handle
 3. If not handled: skill commands (`/skill:name`) expanded to skill content
-4. If not handled: prompt templates (`/template`) expanded to template content
+4. If not handled: prompt templates (`/prompt:<template>`) expanded to template content
 5. Agent processing begins (`before_agent_start`, etc.)
 
 ```typescript
@@ -2249,7 +2249,7 @@ All examples in [examples/extensions/](../examples/extensions/).
 | **Remote & Sandbox** |||
 | `ssh.ts` | SSH remote execution | `registerFlag`, `on("user_bash")`, `on("before_agent_start")`, tool operations |
 | `interactive-shell.ts` | Persistent shell session | `on("user_bash")` |
-| `sandbox/` | Sandboxed tool execution; `/sandbox:info` or `/doctor:sandbox` reports the resolved config and repo file map | Tool operations |
+| `sandbox/` | Sandboxed tool execution; `/sandbox:info` reports the resolved config and repo file map | Tool operations |
 | `subagent/` | Spawn sub-agents | `registerTool`, `exec` |
 | **Games** |||
 | `snake.ts` | Snake game | `registerCommand`, `ui.custom`, keyboard handling |

@@ -991,7 +991,7 @@ export class AgentSession {
 			}
 		}
 
-		// Expand skill commands (/skill:name args) and prompt templates (/template args)
+		// Expand skill commands (/skill:name args) and prompt templates (/prompt:<name> args)
 		let expandedText = currentText;
 		if (expandPromptTemplates) {
 			expandedText = this._expandSkillCommand(expandedText);
@@ -2146,7 +2146,7 @@ export class AgentSession {
 			}));
 
 			const templates: SlashCommandInfo[] = this.promptTemplates.map((template) => ({
-				name: template.name,
+				name: template.name.startsWith("prompt:") ? template.name : `prompt:${template.name}`,
 				description: template.description,
 				source: "prompt",
 				sourceInfo: template.sourceInfo,

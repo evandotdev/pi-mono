@@ -12,7 +12,7 @@ This page is the canonical map for both systems.
 If the sandbox extension is loaded, use:
 
 - `/sandbox` — short status output
-- `/sandbox:info` or `/doctor:sandbox` — detailed topology, config precedence, and repo file map
+- `/sandbox:info` — detailed topology, config precedence, and repo file map
 
 The detailed report is meant to answer the questions that usually cause discovery loops:
 

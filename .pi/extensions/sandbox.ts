@@ -242,8 +242,4 @@ export default function (pi: ExtensionAPI) {
 		handler: sandboxInfoHandler,
 	});
 
-	pi.registerCommand("doctor:sandbox", {
-		description: "Show sandbox topology, config precedence, and repo file map",
-		handler: sandboxInfoHandler,
-	});
 }

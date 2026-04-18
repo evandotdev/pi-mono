@@ -2,7 +2,7 @@
 
 # Prompt Templates
 
-Prompt templates are Markdown snippets that expand into full prompts. Type `/name` in the editor to invoke a template, where `name` is the filename without `.md`.
+Prompt templates are Markdown snippets that expand into full prompts. Type `/prompt:name` in the editor to invoke a template, where `name` is the filename without `.md`.
 
 ## Locations
 
@@ -28,17 +28,17 @@ Review the staged changes (`git diff --cached`). Focus on:
 - Error handling gaps
 ```
 
-- The filename becomes the command name. `review.md` becomes `/review`.
+- The filename becomes the prompt template name. `review.md` becomes `/prompt:review`.
 - `description` is optional. If missing, the first non-empty line is used.
 
 ## Usage
 
-Type `/` followed by the template name in the editor. Autocomplete shows available templates with descriptions.
+Type `/prompt:` followed by the template name in the editor. Autocomplete shows available templates with descriptions.
 
 ```
-/review                           # Expands review.md
-/component Button                 # Expands with argument
-/component Button "click handler" # Multiple arguments
+/prompt:review                           # Expands review.md
+/prompt:component Button                 # Expands with argument
+/prompt:component Button "click handler" # Multiple arguments
 ```
 
 ## Arguments
@@ -59,7 +59,7 @@ description: Create a component
 Create a React component named $1 with features: $@
 ```
 
-Usage: `/component Button "onClick handler" "disabled support"`
+Usage: `/prompt:component Button "onClick handler" "disabled support"`
 
 ## Loading Rules
 
