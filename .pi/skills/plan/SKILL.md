@@ -1,5 +1,6 @@
 ---
-description: Create a concise implementation plan from a task description
+name: plan
+description: Create a concise plan from a task description
 ---
 
 Create a short, actionable implementation plan for: $ARGUMENTS
