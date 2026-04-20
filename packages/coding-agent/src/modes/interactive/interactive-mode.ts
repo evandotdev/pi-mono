@@ -2272,6 +2272,11 @@ export class InteractiveMode {
 				await this.handleClearCommand();
 				return;
 			}
+			if (text === "/session:cwd" || text.startsWith("/session:cwd ")) {
+				this.editor.setText("");
+				await this.handleSessionCwdCommand(text);
+				return;
+			}
 			if (text === "/compact" || text.startsWith("/compact ")) {
 				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
 				this.editor.setText("");
@@ -4869,6 +4874,71 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", `Session name set: ${name}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	private async handleSessionCwdCommand(text: string): Promise<void> {
+		const currentCwd = this.sessionManager.getCwd();
+		const rawTarget = text.replace(/^\/session:cwd\s*/, "").trim();
+		if (!rawTarget) {
+			let info = `${theme.bold("Session Working Directory")}\n\n`;
+			info += `${theme.fg("dim", "Current:")} ${currentCwd}\n`;
+			info += `${theme.fg("dim", "Session dir:")} ${this.sessionManager.getSessionDir()}\n`;
+			info += `${theme.fg("dim", "Usage:")} /session:cwd <path>`;
+			this.chatContainer.addChild(new Spacer(1));
+			this.chatContainer.addChild(new Text(info, 1, 0));
+			this.ui.requestRender();
+			return;
+		}
+
+		if (this.session.isStreaming || this.session.isCompacting || this.session.isBashRunning) {
+			this.showWarning("Wait for the current operation to finish before switching session cwd");
+			return;
+		}
+
+		const targetCwd = path.resolve(currentCwd, rawTarget);
+		let targetStat: fs.Stats;
+		try {
+			targetStat = fs.statSync(targetCwd);
+		} catch {
+			this.showError(`Directory not found: ${targetCwd}`);
+			return;
+		}
+		if (!targetStat.isDirectory()) {
+			this.showError(`Not a directory: ${targetCwd}`);
+			return;
+		}
+		if (targetCwd === currentCwd) {
+			this.showStatus("Session cwd unchanged");
+			return;
+		}
+
+		const confirmed = await this.showExtensionConfirm(
+			"Switch session cwd",
+			`Switch session cwd?\n\nfrom\n${currentCwd}\n\nto\n${targetCwd}`,
+		);
+		if (!confirmed) {
+			this.showStatus("Session cwd unchanged");
+			return;
+		}
+
+		if (this.loadingAnimation) {
+			this.loadingAnimation.stop();
+			this.loadingAnimation = undefined;
+		}
+		this.statusContainer.clear();
+
+		try {
+			const result = await this.runtimeHost.switchCwd(targetCwd);
+			if (!result.changed) {
+				this.showStatus("Session cwd unchanged");
+				return;
+			}
+			await this.handleRuntimeSessionChange();
+			this.renderCurrentSessionState();
+			this.showStatus(`Switched session cwd to ${targetCwd}`);
+		} catch (error: unknown) {
+			await this.handleFatalRuntimeError("Failed to switch session cwd", error);
+		}
 	}
 
 	private handleSessionCommand(): void {

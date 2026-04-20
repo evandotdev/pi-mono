@@ -43,6 +43,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "login", description: "Login with OAuth provider" },
 	{ name: "logout", description: "Logout from OAuth provider" },
 	{ name: "session:new", description: "Start a new session" },
+	{ name: "session:cwd", description: "Show or switch the session working directory (confirmation required)" },
 	{ name: "compact", description: "Manually compact the session context" },
 	{ name: "context", description: "Show context source breakdown" },
 	{ name: "context:clear", description: "Clear current branch context" },

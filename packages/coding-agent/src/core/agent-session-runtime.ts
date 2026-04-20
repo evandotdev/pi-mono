@@ -146,6 +146,29 @@ export class AgentSessionRuntime {
 		return { cancelled: false };
 	}
 
+	async switchCwd(cwd: string): Promise<{ cancelled: boolean; changed: boolean }> {
+		const sessionManager = this.session.sessionManager;
+		const previousCwd = sessionManager.getCwd();
+		if (!sessionManager.setCwd(cwd)) {
+			return { cancelled: false, changed: false };
+		}
+
+		try {
+			const nextRuntime = await this.createRuntime({
+				cwd: sessionManager.getCwd(),
+				agentDir: this.services.agentDir,
+				sessionManager,
+				sessionStartEvent: { type: "session_start", reason: "reload" },
+			});
+			await this.teardownCurrent();
+			this.apply(nextRuntime);
+			return { cancelled: false, changed: true };
+		} catch (error) {
+			sessionManager.setCwd(previousCwd);
+			throw error;
+		}
+	}
+
 	async newSession(options?: {
 		parentSession?: string;
 		setup?: (sessionManager: SessionManager) => Promise<void>;

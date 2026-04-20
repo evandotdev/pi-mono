@@ -168,7 +168,7 @@ export interface SessionContext {
 export interface SessionInfo {
 	path: string;
 	id: string;
-	/** Working directory where the session was started. Empty string for old sessions. */
+	/** Current working directory stored on the session. Empty string for old sessions. */
 	cwd: string;
 	/** User-defined display name from session_info entries. */
 	name?: string;
@@ -786,6 +786,24 @@ export class SessionManager {
 		return this.cwd;
 	}
 
+	setCwd(cwd: string): boolean {
+		const nextCwd = cwd.trim();
+		if (!nextCwd || nextCwd === this.cwd) {
+			return false;
+		}
+
+		this.cwd = nextCwd;
+		const header = this.getHeader();
+		if (header) {
+			header.cwd = nextCwd;
+		}
+		if (this.persist && this.sessionFile && existsSync(this.sessionFile)) {
+			this._rewriteFile();
+			this.flushed = true;
+		}
+		return true;
+	}
+
 	getSessionDir(): string {
 		return this.sessionDir;
 	}
@@ -1296,7 +1314,7 @@ export class SessionManager {
 		const dir = sessionDir ?? getDefaultSessionDir(cwd);
 		const mostRecent = findMostRecentSession(dir);
 		if (mostRecent) {
-			return new SessionManager(cwd, dir, mostRecent, true);
+			return SessionManager.open(mostRecent, dir);
 		}
 		return new SessionManager(cwd, dir, undefined, true);
 	}

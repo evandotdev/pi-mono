@@ -126,6 +126,92 @@ describe("findMostRecentSession", () => {
 	});
 });
 
+describe("SessionManager cwd persistence", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = join(tmpdir(), `session-test-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("rewrites the persisted session header when the session cwd changes", () => {
+		const sessionDir = join(tempDir, "sessions");
+		const initialCwd = join(tempDir, "repo-a");
+		const nextCwd = join(tempDir, "repo-b");
+		mkdirSync(sessionDir, { recursive: true });
+		mkdirSync(initialCwd, { recursive: true });
+		mkdirSync(nextCwd, { recursive: true });
+
+		const session = SessionManager.create(initialCwd, sessionDir);
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "hi" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 2,
+		});
+
+		const sessionFile = session.getSessionFile();
+		expect(sessionFile).toBeTruthy();
+		expect(session.setCwd(nextCwd)).toBe(true);
+		expect(session.getCwd()).toBe(nextCwd);
+		expect(session.getSessionDir()).toBe(sessionDir);
+		expect(session.getSessionFile()).toBe(sessionFile);
+
+		const persisted = loadEntriesFromFile(sessionFile!);
+		expect(persisted[0]).toMatchObject({ type: "session", cwd: nextCwd });
+	});
+
+	it("restores the last persisted session cwd when continuing a recent session", () => {
+		const sessionDir = join(tempDir, "sessions");
+		const initialCwd = join(tempDir, "repo-a");
+		const nextCwd = join(tempDir, "repo-b");
+		mkdirSync(sessionDir, { recursive: true });
+		mkdirSync(initialCwd, { recursive: true });
+		mkdirSync(nextCwd, { recursive: true });
+
+		const session = SessionManager.create(initialCwd, sessionDir);
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "hi" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "test",
+			usage: {
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 2,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: 2,
+		});
+		session.setCwd(nextCwd);
+
+		const resumed = SessionManager.continueRecent(initialCwd, sessionDir);
+		expect(resumed.getCwd()).toBe(nextCwd);
+		expect(resumed.getSessionDir()).toBe(sessionDir);
+	});
+});
+
 describe("SessionManager.setSessionFile with corrupted files", () => {
 	let tempDir: string;
 

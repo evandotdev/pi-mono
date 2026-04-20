@@ -51,10 +51,10 @@ function createPlainReftableRepo(tempDir: string): string {
 	return repoDir;
 }
 
-function createPlainRepo(tempDir: string): string {
-	const repoDir = join(tempDir, "repo");
+function createPlainRepo(tempDir: string, branch = "main", name = "repo"): string {
+	const repoDir = join(tempDir, name);
 	mkdirSync(join(repoDir, ".git"), { recursive: true });
-	writeFileSync(join(repoDir, ".git", "HEAD"), "ref: refs/heads/main\n");
+	writeFileSync(join(repoDir, ".git", "HEAD"), `ref: refs/heads/${branch}\n`);
 	return repoDir;
 }
 
@@ -116,6 +116,25 @@ describe("FooterDataProvider reftable branch detection", () => {
 		try {
 			expect(provider.getGitBranch()).toBe("main");
 			expect(vi.mocked(spawnSync)).not.toHaveBeenCalled();
+		} finally {
+			provider.dispose();
+		}
+	});
+
+	it("updates the cached branch when cwd switches to another worktree", () => {
+		const repoDir = createPlainRepo(tempDir, "main", "repo-a");
+		const worktreeDir = createPlainRepo(tempDir, "perf/context-management", "repo-b");
+		process.chdir(repoDir);
+
+		const provider = new FooterDataProvider();
+		try {
+			const onBranchChange = vi.fn();
+			provider.onBranchChange(onBranchChange);
+
+			expect(provider.getGitBranch()).toBe("main");
+			provider.setCwd(worktreeDir);
+			expect(provider.getGitBranch()).toBe("perf/context-management");
+			expect(onBranchChange).toHaveBeenCalledTimes(1);
 		} finally {
 			provider.dispose();
 		}
