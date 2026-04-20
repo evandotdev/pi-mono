@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-#MISE description="Stow global mise pi tasks into ~/.config/mise (global wrapper)"
+#MISE description="Unstow repo .pi resources from ~/.pi (global wrapper)"
 set -euo pipefail
 
 PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"
-PI_SCRIPT="${PI_MONO_ROOT}/.mise/tasks/pi/stow/install"
+PI_SCRIPT="${PI_MONO_ROOT}/.mise/tasks/pi/stow/resources/uninstall"
 
 if [[ ! -x "${PI_SCRIPT}" ]]; then
-  echo "mise task pi:stow:install: missing executable ${PI_SCRIPT}" >&2
+  echo "mise task pi:stow:resources:uninstall: missing executable ${PI_SCRIPT}" >&2
   echo "Set PI_MONO_ROOT to your pi-mono checkout path." >&2
   exit 1
 fi

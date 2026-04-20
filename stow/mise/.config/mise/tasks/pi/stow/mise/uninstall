@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Unstow global mise pi tasks from ~/.config/mise (global wrapper)"
+#MISE description="Renamed task; use pi:stow:uninstall"
 set -euo pipefail
 
-PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"
-PI_SCRIPT="${PI_MONO_ROOT}/.mise/tasks/pi/stow/mise/uninstall"
-
-if [[ ! -x "${PI_SCRIPT}" ]]; then
-  echo "mise task pi:stow:mise:uninstall: missing executable ${PI_SCRIPT}" >&2
-  echo "Set PI_MONO_ROOT to your pi-mono checkout path." >&2
-  exit 1
-fi
-
-MISE_PROJECT_ROOT="${PI_MONO_ROOT}" exec "${PI_SCRIPT}" "$@"
+echo "pi:stow:mise:uninstall was renamed to pi:stow:uninstall" >&2
+exit 1

@@ -628,13 +628,13 @@ mise run pi:yolo
 To install those `pi:*` tasks globally via stow (so `mise run pi` works from any directory), run from `~/pi-mono`:
 
 ```bash
-mise run pi:stow:mise:install
-mise run pi:stow:mise:uninstall
+mise run pi:stow:install
+mise run pi:stow:uninstall
 ```
 
 Global wrappers default to `~/pi-mono`. If your checkout lives elsewhere, set `PI_MONO_ROOT`.
 
-`pi:stow:mise:install` also writes `~/.pi/agent/extensions/docker-sandbox.json` from this checkout's `.pi/docker-sandbox.json`, keeping the full Docker sandbox config in sync while rewriting `gitconfig` to the checkout's absolute `.pi/gitconfig` path. `pi:stow:mise:uninstall` removes or restores that managed override when it still matches the installed content.
+`pi:stow:install` also writes `~/.pi/agent/extensions/docker-sandbox.json` from this checkout's `.pi/docker-sandbox.json`, keeping the full Docker sandbox config in sync while rewriting `gitconfig` to the checkout's absolute `.pi/gitconfig` path. `pi:stow:uninstall` removes or restores that managed override when it still matches the installed content.
 
 In this fork, the bundled sandbox extension also adds `/sandbox` to show sandbox status, host-to-container mount mappings, and mount verification details. The sandboxed `mise run pi*` wrappers accept repeated `-d/--directory` mounts for extra sandbox paths, resolved from the launch directory and mounted as siblings under `/home/pisandbox` (for example, `mise run pi -d ~/projects/docs -d ../shared`). `pi:yolo` does not support extra sandbox directory mounts.
 

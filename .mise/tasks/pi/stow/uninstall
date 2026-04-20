@@ -1,55 +1,172 @@
 #!/usr/bin/env bash
-#MISE description="Unstow repo .pi resources from ~/.pi (remove symlinks)"
+#MISE description="Unstow global mise pi tasks from ~/.config/mise"
 set -euo pipefail
 
 REPO_ROOT="${MISE_PROJECT_ROOT}"
-REPO_PI_DIR="${REPO_ROOT}/.pi"
-GLOBAL_PI_DIR="${HOME}/.pi"
-MANIFEST_PATH="${GLOBAL_PI_DIR}/.pi-mono-stow-manifest"
-
-DEFAULT_ITEMS=(
-  "extensions"
-  "prompts"
-  "skills"
-  "themes"
-  "guardrails.json"
-  "docker-sandbox.json"
+STOW_ROOT="${REPO_ROOT}/stow"
+PACKAGE_NAME="mise"
+TARGET_ROOT="${HOME}"
+MISE_CONFIG_DIR="${HOME}/.config/mise"
+MANIFEST_PATH="${MISE_CONFIG_DIR}/.pi-mono-stow-manifest-mise"
+BACKUP_ROOT="${MISE_CONFIG_DIR}/.pi-mono-stow-backups/mise"
+LEGACY_TASK_RELS=(
+  ".config/mise/tasks/pi/stow/mise/install"
+  ".config/mise/tasks/pi/stow/mise/uninstall"
 )
+LEGACY_SOURCE_DIR_SUFFIX="/stow/mise/.config/mise/tasks/pi/stow/mise"
 
-if [[ ! -d "${GLOBAL_PI_DIR}" ]]; then
-  echo "pi:stow:uninstall: ${GLOBAL_PI_DIR} does not exist. Nothing to do."
-  exit 0
+if ! command -v stow >/dev/null 2>&1; then
+  echo "pi:stow:uninstall: 'stow' is not installed." >&2
+  echo "Install GNU stow and rerun this command." >&2
+  exit 1
 fi
 
-items=()
-if [[ -f "${MANIFEST_PATH}" ]]; then
-  while IFS= read -r item; do
-    [[ -z "${item}" ]] && continue
-    items+=("${item}")
-  done < "${MANIFEST_PATH}"
-else
-  items=("${DEFAULT_ITEMS[@]}")
-fi
+resolve_symlink_path() {
+  local target_path="$1"
 
-removed_count=0
-skipped_count=0
+  DEST_PATH="${target_path}" node - <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
 
-for item in "${items[@]}"; do
-  src="${REPO_PI_DIR}/${item}"
-  dest="${GLOBAL_PI_DIR}/${item}"
+const destPath = process.env.DEST_PATH;
+const linkTarget = fs.readlinkSync(destPath);
+process.stdout.write(path.resolve(path.dirname(destPath), linkTarget));
+NODE
+}
 
-  if [[ -L "${dest}" && -e "${src}" && "${dest}" -ef "${src}" ]]; then
-    rm "${dest}"
-    removed_count=$((removed_count + 1))
-  else
-    skipped_count=$((skipped_count + 1))
+legacy_task_symlink_removed=0
+cleanup_legacy_task_symlink() {
+  local rel="$1"
+  local dest="${TARGET_ROOT}/${rel}"
+
+  if [[ ! -L "${dest}" ]]; then
+    return
   fi
+
+  local resolved_path=""
+  if ! resolved_path="$(resolve_symlink_path "${dest}" 2>/dev/null)"; then
+    return
+  fi
+
+  case "${resolved_path}" in
+    *"${LEGACY_SOURCE_DIR_SUFFIX}/"*)
+      rm "${dest}"
+      legacy_task_symlink_removed=$((legacy_task_symlink_removed + 1))
+      ;;
+  esac
+}
+
+if [[ -d "${STOW_ROOT}/${PACKAGE_NAME}" ]]; then
+  stow --dir "${STOW_ROOT}" --target "${TARGET_ROOT}" -D --no-folding "${PACKAGE_NAME}"
+fi
+
+for rel in "${LEGACY_TASK_RELS[@]}"; do
+  cleanup_legacy_task_symlink "${rel}"
 done
 
-rm -f "${MANIFEST_PATH}"
+hash_path() {
+  local target_path="$1"
+
+  DEST_PATH="${target_path}" node - <<'NODE'
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+
+const targetPath = process.env.DEST_PATH;
+const stats = fs.lstatSync(targetPath);
+if (stats.isDirectory()) {
+  process.exit(1);
+}
+
+const data = fs.readFileSync(targetPath);
+process.stdout.write(crypto.createHash("sha256").update(data).digest("hex"));
+NODE
+}
+
+restored_count=0
+removed_managed_sandbox_config=0
+skipped_modified_sandbox_config=0
+if [[ -f "${MANIFEST_PATH}" ]]; then
+  timestamp=""
+  sandbox_config_managed="0"
+  sandbox_config_rel=""
+  sandbox_config_sha256=""
+
+  while IFS= read -r line; do
+    case "${line}" in
+      timestamp=*)
+        timestamp="${line#timestamp=}"
+        ;;
+      meta:sandbox_config_managed=*)
+        sandbox_config_managed="${line#meta:sandbox_config_managed=}"
+        ;;
+      meta:sandbox_config_rel=*)
+        sandbox_config_rel="${line#meta:sandbox_config_rel=}"
+        ;;
+      meta:sandbox_config_sha256=*)
+        sandbox_config_sha256="${line#meta:sandbox_config_sha256=}"
+        ;;
+    esac
+  done < "${MANIFEST_PATH}"
+
+  if [[ -n "${timestamp}" && -d "${BACKUP_ROOT}/${timestamp}" ]]; then
+    while IFS= read -r rel; do
+      [[ -z "${rel}" ]] && continue
+
+      case "${rel}" in
+        timestamp=*|meta:*)
+          continue
+          ;;
+      esac
+
+      backup_path="${BACKUP_ROOT}/${timestamp}/${rel}"
+      dest="${TARGET_ROOT}/${rel}"
+
+      if [[ ! -e "${backup_path}" && ! -L "${backup_path}" ]]; then
+        continue
+      fi
+      if [[ -e "${dest}" || -L "${dest}" ]]; then
+        continue
+      fi
+
+      mkdir -p "$(dirname "${dest}")"
+      mv "${backup_path}" "${dest}"
+      restored_count=$((restored_count + 1))
+    done < "${MANIFEST_PATH}"
+  fi
+
+  if [[ "${sandbox_config_managed}" == "1" && -n "${sandbox_config_rel}" && -n "${sandbox_config_sha256}" ]]; then
+    backup_path="${BACKUP_ROOT}/${timestamp}/${sandbox_config_rel}"
+    dest="${TARGET_ROOT}/${sandbox_config_rel}"
+
+    if [[ -e "${dest}" || -L "${dest}" ]]; then
+      current_sha=""
+      if current_sha="$(hash_path "${dest}" 2>/dev/null)" && [[ "${current_sha}" == "${sandbox_config_sha256}" ]]; then
+        if [[ -e "${backup_path}" || -L "${backup_path}" ]]; then
+          rm -rf "${dest}"
+          mkdir -p "$(dirname "${dest}")"
+          mv "${backup_path}" "${dest}"
+          restored_count=$((restored_count + 1))
+        else
+          rm -rf "${dest}"
+          removed_managed_sandbox_config=$((removed_managed_sandbox_config + 1))
+        fi
+      else
+        skipped_modified_sandbox_config=$((skipped_modified_sandbox_config + 1))
+      fi
+    elif [[ -e "${backup_path}" || -L "${backup_path}" ]]; then
+      mkdir -p "$(dirname "${dest}")"
+      mv "${backup_path}" "${dest}"
+      restored_count=$((restored_count + 1))
+    fi
+  fi
+
+  rm -f "${MANIFEST_PATH}"
+fi
 
 cat <<EOF
 pi:stow:uninstall completed
-  removed symlinks: ${removed_count}
-  skipped entries: ${skipped_count}
+  restored backups: ${restored_count}
+  legacy task symlinks removed: ${legacy_task_symlink_removed}
+  removed managed sandbox config: ${removed_managed_sandbox_config}
+  skipped modified sandbox config: ${skipped_modified_sandbox_config}
 EOF

@@ -41,12 +41,13 @@
 - Changed prompt-template command handling to use canonical `/prompt:<template>` commands.
 - Changed model command namespace to colon-style subcommands (`/model:list`, `/model:<scope>`), removed `/model:show`, and removed space-style `/model list` and `/model show`.
 - Changed session command docs and dispatch to use canonical namespaced `/session:*` forms only.
+- Changed stow task naming so global `mise` wrapper installation now uses `pi:stow:install` / `pi:stow:uninstall`, while repo `.pi` resource linking uses `pi:stow:resources:install` / `pi:stow:resources:uninstall`.
 
 ### Fixed
 
 - Fixed the compact footer to keep usage adjacent to the model, always show token totals, and render sandbox/planning/status lines on separate rows.
 - Fixed Docker sandbox image builds on Linux arm64 by explicitly installing the matching `@typescript/native-preview` platform package before workspace builds.
-- Fixed `pi:stow:mise:install` to mirror `.pi/docker-sandbox.json` into `~/.pi/agent/extensions/docker-sandbox.json`, preserving the full Docker sandbox config and pinning `gitconfig` to the checkout path so `mise run pi` works from other directories.
+- Fixed `pi:stow:install` to mirror `.pi/docker-sandbox.json` into `~/.pi/agent/extensions/docker-sandbox.json`, preserving the full Docker sandbox config and pinning `gitconfig` to the checkout path so `mise run pi` works from other directories.
 - Fixed project-local prompts, skills, and extensions not loading when running the monorepo wrappers from `~/pi-mono`.
 - Fixed sandbox root detection so `~/.pi` stays config-only and `mise run pi` no longer mounts the entire `$HOME` tree when a repo-local `.pi` is absent.
 - Fixed `pi:yolo` mistakenly treating wrapper-style extra-directory flags as pi CLI flags by reserving `-d/--directory` for sandbox wrapper mounts and rejecting those flags in the direct-source wrapper.

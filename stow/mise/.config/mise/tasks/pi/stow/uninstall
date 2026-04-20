@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Unstow repo .pi resources from ~/.pi (global wrapper)"
+#MISE description="Unstow global mise pi tasks from ~/.config/mise (global wrapper)"
 set -euo pipefail
 
 PI_MONO_ROOT="${PI_MONO_ROOT:-$HOME/pi-mono}"

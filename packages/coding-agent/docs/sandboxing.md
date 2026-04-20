@@ -34,7 +34,7 @@ The launcher resolves config in this order:
 3. `<repo>/.pi/docker-sandbox.json`
 4. CLI/runtime overrides from `PI_SANDBOX_*`
 
-When you use `mise run pi:stow:mise:install`, the global file is generated from the repo `.pi/docker-sandbox.json` and keeps the same Docker sandbox fields outside the repo, while pinning `gitconfig` to the checkout path.
+When you use `mise run pi:stow:install`, the global file is generated from the repo `.pi/docker-sandbox.json` and keeps the same Docker sandbox fields outside the repo, while pinning `gitconfig` to the checkout path.
 
 ### Key files
 
@@ -46,15 +46,15 @@ When you use `mise run pi:stow:mise:install`, the global file is generated from 
 - `.mise/tasks/pi/shell` — interactive shell inside the sandbox container
 - `.mise/tasks/pi/yolo` — explicit opt-out wrapper
 - `.mise/tasks/pi/build` — rebuild task
-- `.mise/tasks/pi/stow/install` and `.mise/tasks/pi/stow/uninstall` — stow helpers used to manage repo-local resources
-- `.mise/tasks/pi/stow/mise/install` and `.mise/tasks/pi/stow/mise/uninstall` — global `mise` task wrapper installers
+- `.mise/tasks/pi/stow/install` and `.mise/tasks/pi/stow/uninstall` — global `mise` task wrapper installers
+- `.mise/tasks/pi/stow/resources/install` and `.mise/tasks/pi/stow/resources/uninstall` — stow helpers used to manage repo-local resources
 
 ### What to inspect when folders look wrong
 
 - `scripts/pi-sandbox.mjs`
 - `.mise/tasks/pi/*`
 - `.pi/docker-sandbox.json` — repo-local source of truth for Docker sandbox settings
-- `~/.pi/agent/extensions/docker-sandbox.json` — managed global mirror written by `pi:stow:mise:install`
+- `~/.pi/agent/extensions/docker-sandbox.json` — managed global mirror written by `pi:stow:install`
 
 ## OS-level sandbox extension
 

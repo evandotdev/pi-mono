@@ -114,8 +114,8 @@ const RELEVANT_FILES = [
 	".mise/tasks/pi/build",
 	".mise/tasks/pi/stow/install",
 	".mise/tasks/pi/stow/uninstall",
-	".mise/tasks/pi/stow/mise/install",
-	".mise/tasks/pi/stow/mise/uninstall",
+	".mise/tasks/pi/stow/resources/install",
+	".mise/tasks/pi/stow/resources/uninstall",
 	".pi/extensions/sandbox.ts",
 	"packages/coding-agent/examples/extensions/sandbox/index.ts",
 	"packages/coding-agent/docs/sandboxing.md",
@@ -367,8 +367,9 @@ export function formatSandboxReport(report: SandboxReport): string {
 	lines.push(
 		"  - Sandbox launch wrappers: .mise/tasks/pi/_default, .mise/tasks/pi/readonly, .mise/tasks/pi/shell, .mise/tasks/pi/yolo, .mise/tasks/pi/build",
 	);
+	lines.push("  - Global mise wrapper installers: .mise/tasks/pi/stow/install, .mise/tasks/pi/stow/uninstall");
 	lines.push(
-		"  - Repo resource installers: .mise/tasks/pi/stow/install, .mise/tasks/pi/stow/uninstall, .mise/tasks/pi/stow/mise/install, .mise/tasks/pi/stow/mise/uninstall",
+		"  - Repo resource installers: .mise/tasks/pi/stow/resources/install, .mise/tasks/pi/stow/resources/uninstall",
 	);
 	lines.push(
 		"  - Extension sandbox example: .pi/extensions/sandbox.ts and packages/coding-agent/examples/extensions/sandbox/index.ts",

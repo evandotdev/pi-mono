@@ -111,7 +111,7 @@ describe("sandbox info report", () => {
 		expect(report.dockerSandbox.resolved.passEnv).toBe(false);
 		expect(output).toContain("/sandbox:info");
 		expect(output).toContain("scripts/pi-sandbox.mjs");
-		expect(output).toContain(".mise/tasks/pi/stow/mise/install");
+		expect(output).toContain(".mise/tasks/pi/stow/resources/install");
 		expect(output).toContain("Editing map:");
 		expect(output).toContain("Docker sandbox config:");
 		expect(output).toContain("OS sandbox config:");
