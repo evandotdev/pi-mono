@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { visibleWidth } from "@mariozechner/pi-tui";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -16,6 +19,7 @@ type AssistantUsage = {
 
 function createSession(options: {
 	sessionName: string;
+	cwd?: string;
 	modelId?: string;
 	provider?: string;
 	reasoning?: boolean;
@@ -49,7 +53,7 @@ function createSession(options: {
 		sessionManager: {
 			getEntries: () => entries,
 			getSessionName: () => options.sessionName,
-			getCwd: () => "/tmp/project",
+			getCwd: () => options.cwd ?? "/tmp/project",
 			getSessionId: () => "12345678-1234-1234-1234-1234567890ab",
 		},
 		getContextUsage: () => ({ contextWindow: 200_000, percent: 12.3 }),
@@ -68,12 +72,13 @@ function stripAnsi(text: string): string {
 function createFooterData(
 	providerCount: number,
 	options?: {
+		gitBranch?: string | null;
 		extensionStatuses?: Map<string, string>;
 		providerUsage?: Map<string, ProviderUsage>;
 	},
 ): ReadonlyFooterDataProvider {
 	const provider = {
-		getGitBranch: () => "main",
+		getGitBranch: () => options?.gitBranch ?? "main",
 		getExtensionStatuses: () => options?.extensionStatuses ?? new Map<string, string>(),
 		getAvailableProviderCount: () => providerCount,
 		onBranchChange: (callback: () => void) => {
@@ -88,6 +93,25 @@ function createFooterData(
 	};
 
 	return provider;
+}
+
+function createFakeWorktreeFixture(): { rootDir: string; worktreeDir: string; cleanup: () => void } {
+	const rootDir = mkdtempSync(join(tmpdir(), "footer-width-"));
+	const repoDir = join(rootDir, "pi-mono");
+	const commonGitDir = join(repoDir, ".git");
+	const gitDir = join(commonGitDir, "worktrees", "perf-context-management");
+	const worktreeDir = join(rootDir, "pi-mono-perf-context-management");
+
+	mkdirSync(gitDir, { recursive: true });
+	mkdirSync(worktreeDir, { recursive: true });
+	writeFileSync(join(worktreeDir, ".git"), `gitdir: ${gitDir}\n`);
+	writeFileSync(join(gitDir, "commondir"), "../..\n");
+
+	return {
+		rootDir,
+		worktreeDir,
+		cleanup: () => rmSync(rootDir, { recursive: true, force: true }),
+	};
 }
 
 describe("FooterComponent width handling", () => {
@@ -158,9 +182,9 @@ describe("FooterComponent width handling", () => {
 		expect(visibleWidth(lines[1])).toBeLessThanOrEqual(width);
 
 		const plainSecondLine = stripAnsi(lines[1]);
-		expect(plainSecondLine).toMatch(/^Ctx:/);
+		expect(plainSecondLine).toContain("cwd:project");
+		expect(plainSecondLine).toContain("ctx:");
 		expect(plainSecondLine).toContain("12% of 200k");
-		expect(plainSecondLine).toContain("Tokens:");
 	});
 
 	it("shows zero token totals on startup", () => {
@@ -176,8 +200,9 @@ describe("FooterComponent width handling", () => {
 		expect(visibleWidth(lines[1])).toBeLessThanOrEqual(width);
 
 		const plainSecondLine = stripAnsi(lines[1]);
-		expect(plainSecondLine).toContain("Ctx:");
-		expect(plainSecondLine).toContain("Tokens:");
+		expect(plainSecondLine).toContain("cwd:project");
+		expect(plainSecondLine).toContain("ctx:");
+		expect(plainSecondLine).toContain("tokens:");
 		expect(plainSecondLine).toContain("in 0");
 		expect(plainSecondLine).toContain("out 0");
 		expect(plainSecondLine).toContain("R0/W0");
@@ -210,7 +235,7 @@ describe("FooterComponent width handling", () => {
 
 		const lines = footer.render(width);
 		const plainFirstLine = stripAnsi(lines[0]);
-		expect(plainFirstLine).toContain("test-model • high │ Usage:");
+		expect(plainFirstLine).toContain("test-model • high │ usage:");
 	});
 
 	it("keeps the Pi version on the third line when no sandbox status is present", () => {
@@ -233,8 +258,8 @@ describe("FooterComponent width handling", () => {
 		expect(visibleWidth(lines[2])).toBeLessThanOrEqual(width);
 
 		const plainThirdLine = stripAnsi(lines[2]);
-		expect(plainThirdLine).toMatch(/^Pi:/);
-		expect(plainThirdLine).not.toContain("Tokens:");
+		expect(plainThirdLine).toMatch(/^pi:/);
+		expect(plainThirdLine).not.toContain("tokens:");
 	});
 
 	it("filters usage windows to duration-style names in the compact footer", () => {
@@ -261,7 +286,7 @@ describe("FooterComponent width handling", () => {
 
 		const lines = footer.render(width);
 		const plainFirstLine = stripAnsi(lines[0]);
-		expect(plainFirstLine).toContain("Usage:");
+		expect(plainFirstLine).toContain("usage:");
 		expect(plainFirstLine).toContain("5h");
 		expect(plainFirstLine).toContain("7d");
 		expect(plainFirstLine).not.toContain("GPT-5.3-Codex-Spark");
@@ -288,12 +313,37 @@ describe("FooterComponent width handling", () => {
 		const lines = footer.render(width);
 		expect(visibleWidth(lines[2])).toBeLessThanOrEqual(width);
 		expect(visibleWidth(lines[3])).toBeLessThanOrEqual(width);
+		expect(visibleWidth(lines[4])).toBeLessThanOrEqual(width);
 
-		const sandboxLine = stripAnsi(lines[2]);
-		const planningLine = stripAnsi(lines[3]);
+		const piLine = stripAnsi(lines[2]);
+		const sandboxLine = stripAnsi(lines[3]);
+		const planningLine = stripAnsi(lines[4]);
+		expect(piLine).toMatch(/^pi:/);
 		expect(sandboxLine).toContain("Sandbox");
 		expect(sandboxLine).not.toContain("Planning with");
 		expect(planningLine).toContain("Planning with 3 steps");
 		expect(planningLine).not.toContain("Sandbox");
+	});
+
+	it("separates parent git repo and worktree cwd labels", () => {
+		const fixture = createFakeWorktreeFixture();
+		try {
+			const width = 160;
+			const session = createSession({
+				sessionName: "",
+				cwd: fixture.worktreeDir,
+				modelId: "test-model",
+				provider: "test",
+			});
+			const footer = new FooterComponent(session, createFooterData(1, { gitBranch: "perf/context-management" }));
+
+			const lines = footer.render(width);
+			const plainFirstLine = stripAnsi(lines[0]);
+			const plainSecondLine = stripAnsi(lines[1]);
+			expect(plainFirstLine).toContain("git:pi-mono (perf/context-management)");
+			expect(plainSecondLine).toContain("cwd:pi-mono-perf-context-management");
+		} finally {
+			fixture.cleanup();
+		}
 	});
 });

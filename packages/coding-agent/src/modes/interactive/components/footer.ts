@@ -1,14 +1,15 @@
 import type { ProviderUsage } from "@mariozechner/pi-ai";
 import { type Component, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { spawnSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { basename, dirname, join } from "path";
+import { existsSync, readFileSync, statSync } from "fs";
+import { basename, dirname, join, resolve } from "path";
 import { getPackageDir, VERSION } from "../../../config.js";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { theme } from "../theme/theme.js";
 
 type GitSummary = {
+	repoName: string;
 	branch: string | null;
 	linesAdded: number;
 	linesRemoved: number;
@@ -69,29 +70,6 @@ function joinSegments(segments: Array<string | undefined>, separator: string): s
 	return segments.filter((segment): segment is string => Boolean(segment && segment.length > 0)).join(separator);
 }
 
-function fitLeftAndRight(left: string, right: string, width: number, separator: string): string {
-	const ellipsis = theme.fg("dim", "...");
-
-	if (!left && !right) return "";
-	if (!right) return truncateToWidth(left, width, ellipsis);
-	if (!left) return truncateToWidth(right, width, ellipsis);
-
-	const rightWidth = visibleWidth(right);
-	const separatorWidth = visibleWidth(separator);
-	if (rightWidth >= width) {
-		return truncateToWidth(right, width, ellipsis);
-	}
-
-	const availableForLeft = width - separatorWidth - rightWidth;
-	if (availableForLeft <= 0) {
-		return truncateToWidth(right, width, ellipsis);
-	}
-
-	const fittedLeft = truncateToWidth(left, availableForLeft, ellipsis);
-	const extraPaddingWidth = Math.max(0, width - visibleWidth(fittedLeft) - separatorWidth - rightWidth);
-	return `${fittedLeft}${" ".repeat(extraPaddingWidth)}${separator}${right}`;
-}
-
 function fitLeftAndAdjacentSuffix(left: string, suffix: string, width: number, separator: string): string {
 	const ellipsis = theme.fg("dim", "...");
 
@@ -134,11 +112,31 @@ function runGitCommandSuccess(repoDir: string, args: string[]): boolean {
 	return result.status === 0;
 }
 
-function findGitRepoDir(startDir: string): string | null {
+function findGitRepoInfo(startDir: string): { repoDir: string; repoName: string } | null {
 	let dir = startDir;
 	while (true) {
-		if (existsSync(join(dir, ".git"))) {
-			return dir;
+		const gitPath = join(dir, ".git");
+		if (existsSync(gitPath)) {
+			try {
+				const stat = statSync(gitPath);
+				if (stat.isDirectory()) {
+					return { repoDir: dir, repoName: basename(dir) || dir };
+				}
+				if (stat.isFile()) {
+					const content = readFileSync(gitPath, "utf8").trim();
+					if (content.startsWith("gitdir: ")) {
+						const gitDir = resolve(dir, content.slice(8).trim());
+						const commonDirPath = join(gitDir, "commondir");
+						const commonGitDir = existsSync(commonDirPath)
+							? resolve(gitDir, readFileSync(commonDirPath, "utf8").trim())
+							: gitDir;
+						const repoName = basename(dirname(commonGitDir)) || basename(dir) || dir;
+						return { repoDir: dir, repoName };
+					}
+				}
+			} catch {
+				return null;
+			}
 		}
 		const parent = dirname(dir);
 		if (parent === dir) return null;
@@ -196,18 +194,18 @@ function parseShortStat(diffStats: string): { linesAdded: number; linesRemoved: 
 }
 
 function resolveGitSummary(cwd: string, branch: string | null): GitSummary | null {
-	const repoDir = findGitRepoDir(cwd);
-	if (!repoDir || !branch) return null;
+	const repoInfo = findGitRepoInfo(cwd);
+	if (!repoInfo || !branch) return null;
 
-	const baseBranch = resolveBaseBranch(repoDir);
+	const baseBranch = resolveBaseBranch(repoInfo.repoDir);
 	const diffTarget = baseBranch && branch !== "detached" && branch !== baseBranch ? `${baseBranch}...HEAD` : "HEAD";
-	const diffStats = runGitCommand(repoDir, ["diff", "--shortstat", diffTarget]) ?? "";
+	const diffStats = runGitCommand(repoInfo.repoDir, ["diff", "--shortstat", diffTarget]) ?? "";
 	const { linesAdded, linesRemoved } = parseShortStat(diffStats);
 
 	let syncStatus = "";
-	const upstream = runGitCommand(repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
+	const upstream = runGitCommand(repoInfo.repoDir, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
 	if (upstream) {
-		const counts = runGitCommand(repoDir, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
+		const counts = runGitCommand(repoInfo.repoDir, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
 		if (counts) {
 			const [aheadRaw = "0", behindRaw = "0"] = counts.split(/\s+/);
 			const ahead = Number.parseInt(aheadRaw, 10) || 0;
@@ -220,6 +218,7 @@ function resolveGitSummary(cwd: string, branch: string | null): GitSummary | nul
 	}
 
 	return {
+		repoName: repoInfo.repoName,
 		branch,
 		linesAdded,
 		linesRemoved,
@@ -350,13 +349,13 @@ function formatCompactUsageSegment(
 		.sort((a, b) => a - b)[0];
 	const resetText = soonestReset !== undefined ? formatResetCountdown(soonestReset) : null;
 	const usageValue = `${usageParts.join(" ")}${resetText ? ` ${theme.fg("dim", resetText)}` : ""}`;
-	return `${label("Usage")}${usageValue}`;
+	return `${label("usage")}${usageValue}`;
 }
 
 /**
- * Footer component that shows cwd/session/model/usage on the first line,
- * context/tokens/cost on the second, sandbox/Pi on the third,
- * and remaining extension statuses on separate rows below.
+ * Footer component that shows git/session/model/usage on the first line,
+ * cwd/context/tokens/cost on the second, pi on the third,
+ * and extension statuses on separate rows below.
  */
 export class FooterComponent implements Component {
 	private static readonly GIT_SUMMARY_TTL_MS = 1500;
@@ -412,7 +411,7 @@ export class FooterComponent implements Component {
 		void this.autoCompactEnabled;
 		const state = this.session.state;
 		const separator = ` ${theme.fg("dim", "│")} `;
-		const label = (text: string): string => theme.fg("dim", `${text}:`);
+		const label = (text: string): string => theme.fg("dim", `${text.toLowerCase()}:`);
 
 		let totalInput = 0;
 		let totalOutput = 0;
@@ -462,9 +461,12 @@ export class FooterComponent implements Component {
 			? `${theme.fg("dim", `(${state.model.provider})`)} ${white(modelInfoWithoutProvider)}`
 			: white(modelInfoWithoutProvider);
 
-		let cwdValue = white(cwdBase);
-		if (gitSummary?.branch) {
-			cwdValue += white(` (${gitSummary.branch})`);
+		let gitSegment: string | undefined;
+		if (gitSummary) {
+			let gitValue = white(gitSummary.repoName);
+			if (gitSummary.branch) {
+				gitValue += white(` (${gitSummary.branch})`);
+			}
 
 			const gitParts: string[] = [];
 			if (gitSummary.linesAdded > 0 || gitSummary.linesRemoved > 0) {
@@ -474,15 +476,14 @@ export class FooterComponent implements Component {
 				gitParts.push(theme.fg("dim", gitSummary.syncStatus));
 			}
 			if (gitParts.length > 0) {
-				cwdValue += ` ${gitParts.join(" ")}`;
+				gitValue += ` ${gitParts.join(" ")}`;
 			}
+			gitSegment = `${label("git")}${gitValue}`;
 		}
-		const cwdSegment = `${label("CWD")}${cwdValue}`;
 
+		const cwdSegment = `${label("cwd")}${white(cwdBase)}`;
 		const sessionValue = sessionName ? white(`${sessionName} (${shortSessionId})`) : white(shortSessionId);
-		const sessionSegment = `${label("SESH")}${sessionValue}`;
-
-		const line1Left = joinSegments([cwdSegment, sessionSegment], separator);
+		const sessionSegment = `${label("sesh")}${sessionValue}`;
 
 		const clampedContextPercent = Math.max(0, Math.min(100, contextPercentValue ?? 0));
 		const contextPercentText =
@@ -493,41 +494,39 @@ export class FooterComponent implements Component {
 			contextPercentValue === null
 				? theme.fg("dim", contextPercentText)
 				: colorizePercent(contextPercentText, clampedContextPercent);
-		const contextSegment = `${label("Ctx")}${buildContextBar(clampedContextPercent)} ${contextPercentDisplay} ${theme.fg("dim", `of ${formatTokens(contextWindow)}`)}`;
+		const contextSegment = `${label("ctx")}${buildContextBar(clampedContextPercent)} ${contextPercentDisplay} ${theme.fg("dim", `of ${formatTokens(contextWindow)}`)}`;
 
 		const currentProvider = state.model?.provider;
 		const providerUsage = this.footerData.getProviderUsage();
 		const currentUsage = currentProvider ? providerUsage.get(currentProvider) : undefined;
 		const usageSegment = formatCompactUsageSegment(currentUsage, label);
 
-		const line1LeftSection = joinSegments([line1Left, modelInfo], separator);
+		const line1Left = joinSegments([gitSegment, sessionSegment, modelInfo], separator);
 		const line1 = usageSegment
-			? fitLeftAndAdjacentSuffix(line1LeftSection, usageSegment, width, separator)
-			: truncateToWidth(line1LeftSection, width, theme.fg("dim", "..."));
+			? fitLeftAndAdjacentSuffix(line1Left, usageSegment, width, separator)
+			: truncateToWidth(line1Left, width, theme.fg("dim", "..."));
 
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		const costValue = `${theme.fg("dim", formatCost(totalCost))}${usingSubscription ? theme.fg("dim", " (sub)") : ""}`;
-		const costSegment = `${label("Cost")}${costValue}`;
+		const costSegment = `${label("cost")}${costValue}`;
 		const tokensValue = `in ${formatTokens(totalInput)} out ${formatTokens(totalOutput)} cache R${formatTokens(totalCacheRead)}/W${formatTokens(totalCacheWrite)}`;
-		const tokensSegment = `${label("Tokens")}${theme.fg("dim", tokensValue)}`;
+		const tokensSegment = `${label("tokens")}${theme.fg("dim", tokensValue)}`;
 		const line2 = truncateToWidth(
-			joinSegments([contextSegment, tokensSegment, costSegment], separator),
+			joinSegments([cwdSegment, contextSegment, tokensSegment, costSegment], separator),
 			width,
 			theme.fg("dim", "..."),
 		);
 
 		const extensionStatuses = this.footerData.getExtensionStatuses();
-		const sandboxStatus = sanitizeStatusText(extensionStatuses.get("sandbox") ?? "");
-		const sandboxSegment = sandboxStatus.length > 0 ? sandboxStatus : undefined;
 		const piVersionDisplay = getPiVersionDisplay();
-		const piSegment = piVersionDisplay ? `${label("Pi")}${theme.fg("dim", piVersionDisplay)}` : "";
-		const line3 = fitLeftAndRight(sandboxSegment ?? "", piSegment, width, separator);
+		const piSegment = piVersionDisplay ? `${label("pi")}${theme.fg("dim", piVersionDisplay)}` : "";
+		const line3 = truncateToWidth(piSegment, width, theme.fg("dim", "..."));
 
 		const lines = [line1, line2, line3];
 
-		const statusLines = Array.from(extensionStatuses.entries())
-			.filter(([key, text]) => key !== "sandbox" && text !== undefined)
-			.map(([, text]) => sanitizeStatusText(text))
+		const statusLines = Array.from(extensionStatuses.values())
+			.filter((text): text is string => text !== undefined)
+			.map((text) => sanitizeStatusText(text))
 			.filter((text) => text.length > 0);
 
 		for (const statusLine of statusLines) {
